@@ -9,6 +9,7 @@ sudo apt install g++ libthrift-dev make thrift-compiler libboost1.74-dev lz4 \
   ./libsaibcm*.deb
 make
 
+sudo systemctl stop syncd
 sudo mknod /dev/linux-user-bde c 126 0
 sudo rmmod linux_knet_cb
 sudo rmmod psample
