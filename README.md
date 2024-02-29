@@ -9,6 +9,7 @@ sudo apt install binutils g++ libthrift-dev make thrift-compiler libboost1.74-de
 sudo apt install ./libsaibcm*.deb
 make
 
+sudo systemctl stop swss
 sudo systemctl stop syncd
 sudo mknod /dev/linux-user-bde c 126 0
 sudo rmmod linux_knet_cb
