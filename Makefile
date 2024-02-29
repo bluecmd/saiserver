@@ -30,7 +30,7 @@ PY_SOURCES = src/gen-py/switch_sai/switch_sai_rpc.py
 
 MKDIR_P = mkdir -p
 
-all: directories $(ODIR)/librpcserver.a saiserver
+all: directories $(ODIR)/librpcserver.a saiserver $(PY_SOURCES)
 
 directories:
 	$(MKDIR_P) $(ODIR)
