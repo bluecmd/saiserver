@@ -4,29 +4,8 @@ SAI_PREFIX = /usr
 SAI_HEADER_DIR ?= $(SAI_PREFIX)/include/sai
 SAI_HEADERS = $(SAI_HEADER_DIR)/sai*.h
 CFLAGS = -I$(SAI_HEADER_DIR) -I. -I$(SAI_HEADER_DIR)/experimental -std=c++11
-ifeq ($(DEBUG),1)
-CFLAGS += -O0 -ggdb
-endif
+CFLAGS += -O0 -ggdb -Wall -pedantic
 
-# Detect THRIFT_VERSION
-THRIFT_VERSION = $(shell thrift  -version | cut -d ' ' -f3)
-ifeq ($(shell dpkg --compare-versions $(THRIFT_VERSION) "le" 0.11.0 && echo True), True)
-CFLAGS += -DFORCE_BOOST_SMART_PTR
-endif
-
-ifeq ($(platform),MLNX)
-CDEFS = -DMLNXSAI
-else
-ifeq ($(platform),BFT)
-CDEFS = -DBFTSAI
-else
-ifeq ($(platform),CAVIUM)
-CDEFS = -DCAVIUMSAI
-else
-CDEFS = -DBRCMSAI
-endif
-endif
-endif
 DEPS =  switch_sai_rpc.h  switch_sai_types.h
 OBJS =  switch_sai_rpc.o  switch_sai_types.o
 
@@ -39,12 +18,7 @@ CTYPESGEN = /usr/local/bin/ctypesgen
 else
 CTYPESGEN = /usr/local/bin/ctypesgen.py
 endif
-LIBS = -lthrift -lpthread
-ifeq ($(platform),vs)
-LIBS += -lsaivs -lsaimeta -lsaimetadata -lzmq
-else
-LIBS += -lsai
-endif
+LIBS = -lthrift -lpthread -lsai
 SAI_LIBRARY_DIR ?= $(SAI_PREFIX)/lib
 LDFLAGS = -L$(SAI_LIBRARY_DIR) -Wl,-rpath=$(SAI_LIBRARY_DIR)
 CPP_SOURCES = \
@@ -54,16 +28,6 @@ CPP_SOURCES = \
 				src/gen-cpp/switch_sai_types.h
 
 MKDIR_P = mkdir -p
-INSTALL := /usr/bin/install
-
-ifeq ($(shell dpkg --compare-versions $(THRIFT_VERSION) "lt" 0.14.1 && echo True), True)
-DEPS += switch_sai_constants.h
-OBJS += switch_sai_constants.o
-CPP_SOURCES += src/gen-cpp/switch_sai_constants.cpp \
-               src/gen-cpp/switch_sai_constants.h
-
-CONSTANS_OBJ = $(ODIR)/switch_sai_constants.o
-endif
 
 all: directories $(ODIR)/librpcserver.a saiserver
 
@@ -71,6 +35,7 @@ directories:
 	$(MKDIR_P) $(ODIR)
 
 $(CPP_SOURCES): src/switch_sai.thrift
+	\rm -fr $(SRC)/gen-cpp
 	$(THRIFT) -o $(SRC) --gen cpp -r $(SRC)/switch_sai.thrift
 
 $(ODIR)/%.o: src/gen-cpp/%.cpp

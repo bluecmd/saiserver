@@ -1,5 +1,5 @@
 /*
-Copyright 2013-present Barefoot Networks, Inc.
+Copyright 2013 Barefoot Networks, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,12 +21,12 @@ typedef i64 sai_thrift_object_id_t
 typedef i64 sai_thrift_uint64_t
 typedef i16 sai_thrift_vlan_id_t
 typedef string sai_thrift_mac_t
-typedef byte sai_thrift_vlan_tagging_mode_t
+typedef i8 sai_thrift_vlan_tagging_mode_t
 typedef i32 sai_thrift_status_t
 typedef string sai_thrift_ip4_t
 typedef string sai_thrift_ip6_t
-typedef byte sai_thrift_ip_addr_family_t
-typedef byte sai_thrift_port_stp_port_state_t
+typedef i8 sai_thrift_ip_addr_family_t
+typedef i8 sai_thrift_port_stp_port_state_t
 typedef i32 sai_thrift_hostif_trap_id_t
 typedef i32 sai_thrift_next_hop_type_t
 typedef i32 sai_thrift_vlan_stat_counter_t
@@ -80,8 +80,8 @@ struct sai_thrift_s32_list_t {
 }
 
 struct sai_thrift_acl_mask_t {
-    1: byte u8;
-    2: byte s8;
+    1: i8 u8;
+    2: i8 s8;
     3: i16 u16;
     4: i16 s16;
     5: i32 u32;
@@ -92,8 +92,8 @@ struct sai_thrift_acl_mask_t {
 }
 
 struct sai_thrift_acl_data_t {
-    1: byte u8;
-    2: byte s8;
+    1: i8 u8;
+    2: i8 s8;
     3: i16 u16;
     4: i16 s16;
     5: i32 u32;
@@ -113,8 +113,8 @@ struct sai_thrift_acl_field_data_t
 }
 
 struct sai_thrift_acl_parameter_t {
-    1: byte u8;
-    2: byte s8;
+    1: i8 u8;
+    2: i8 s8;
     3: i16 u16;
     4: i16 s16;
     5: i32 u32;
@@ -137,13 +137,13 @@ struct sai_thrift_u32_list_t {
 }
 
 struct sai_thrift_qos_map_params_t {
-    1: byte tc;
-    2: byte dscp;
-    3: byte dot1p;
-    4: byte prio;
-    5: byte pg;
-    6: byte queue_index;
-    7: byte color;
+    1: i8 tc;
+    2: i8 dscp;
+    3: i8 dot1p;
+    4: i8 prio;
+    5: i8 pg;
+    6: i8 queue_index;
+    7: i8 color;
 }
 
 struct sai_thrift_qos_map_t {
@@ -164,8 +164,8 @@ struct sai_thrift_fdb_values_t {
 struct sai_thrift_attribute_value_t {
     1:  bool booldata;
     2:  string chardata;
-    3:  byte u8;
-    4:  byte s8;
+    3:  i8 u8;
+    4:  i8 s8;
     5:  i16 u16;
     6:  i16 s16;
     7:  i32 u32;
