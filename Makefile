@@ -26,6 +26,7 @@ CPP_SOURCES = \
 				src/gen-cpp/switch_sai_rpc.h \
 				src/gen-cpp/switch_sai_types.cpp \
 				src/gen-cpp/switch_sai_types.h
+PY_SOURCES = src/gen-py/switch_sai/switch_sai_rpc.py
 
 MKDIR_P = mkdir -p
 
@@ -37,6 +38,10 @@ directories:
 $(CPP_SOURCES): src/switch_sai.thrift
 	\rm -fr $(SRC)/gen-cpp
 	$(THRIFT) -o $(SRC) --gen cpp -r $(SRC)/switch_sai.thrift
+
+$(PY_SOURCES): src/switch_sai.thrift
+	\rm -fr $(SRC)/gen-py
+	$(THRIFT) -o $(SRC) --gen py -r $(SRC)/switch_sai.thrift
 
 $(ODIR)/%.o: src/gen-cpp/%.cpp
 	$(CXX) $(CFLAGS) -c $^ -o $@
@@ -55,4 +60,4 @@ saiserver: $(ODIR)/saiserver.o $(ODIR)/librpcserver.a
 		   $(ODIR)/librpcserver.a $(LIBS)
 
 clean:
-	rm -rf $(ODIR) $(SRC)/gen-cpp saiserver dist
+	rm -rf $(ODIR) $(SRC)/gen-* saiserver dist
