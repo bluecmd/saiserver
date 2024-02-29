@@ -192,6 +192,8 @@ const sai_service_method_table_t test_services = {
 void sai_diag_shell() {
   sai_status_t status;
 
+  // Allow the system to start up and the console to calm down
+  sleep(2);
   while (true) {
     sai_attribute_t attr;
     attr.id = SAI_SWITCH_ATTR_SWITCH_SHELL_ENABLE;
