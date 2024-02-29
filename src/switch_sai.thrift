@@ -294,13 +294,11 @@ service switch_sai_rpc {
 
     //switch API
     sai_thrift_attribute_list_t sai_thrift_get_switch_attribute();
-    sai_thrift_attribute_t sai_thrift_get_port_list_by_front_port();
     sai_thrift_object_id_t sai_thrift_get_cpu_port_id();
     sai_thrift_object_id_t sai_thrift_get_default_trap_group();
     sai_thrift_object_id_t sai_thrift_get_default_router_id();
     sai_thrift_object_id_t sai_thrift_get_default_1q_bridge_id();
     sai_thrift_result_t sai_thrift_get_default_vlan_id();
-    sai_thrift_object_id_t sai_thrift_get_port_id_by_front_port(1: string port_name);
     sai_thrift_status_t sai_thrift_set_switch_attribute(1: sai_thrift_attribute_t attribute);
     i64 sai_thrift_get_switch_stats_by_oid(1: sai_thrift_object_id_t thrift_counter_id);
 

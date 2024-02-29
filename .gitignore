@@ -2,7 +2,6 @@ src/gen-*/**
 src/obj/**
 *.deb
 *.bcm
-*.ini
 .*.sw?
 
 __pycache__/

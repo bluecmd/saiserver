@@ -144,3 +144,5 @@ drivshell>ps
        ce7( 41)  !ena   4  100G  FD   SW  No   Forward          None   FA    CR4  9412    No          IEEE
 drivshell>
 ```
+
+Use `./saiclient` to set all ports to enabled.

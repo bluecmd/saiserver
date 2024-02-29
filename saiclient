@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+import sys
+import glob
+import time
+sys.path.append('src/gen-py')
+
+import switch_sai.switch_sai_rpc as switch_sai_rpc
+from switch_sai.ttypes import *
+from sai_types import *
+
+from thrift import Thrift
+from thrift.transport import TSocket
+from thrift.transport import TTransport
+from thrift.protocol import TBinaryProtocol
+
+
+def main():
+    transport = TSocket.TSocket('localhost', 9090)
+    transport = TTransport.TBufferedTransport(transport)
+    protocol = TBinaryProtocol.TBinaryProtocol(transport)
+    client = switch_sai_rpc.Client(protocol)
+
+    transport.open()
+
+    sai_port_list = []
+    switch_attr_list = client.sai_thrift_get_switch_attribute()
+    attr_list = switch_attr_list.attr_list
+    for attribute in attr_list:
+        if attribute.id == SAI_SWITCH_ATTR_PORT_LIST:
+            for port_id in attribute.value.objlist.object_id_list:
+                attr_value = sai_thrift_attribute_value_t(booldata=1)
+                attr = sai_thrift_attribute_t(id=SAI_PORT_ATTR_ADMIN_STATE, value=attr_value)
+                client.sai_thrift_set_port_attribute(port_id, attr)
+                sai_port_list.append(port_id)
+
+    for port in sai_port_list:
+        port_attr_list = client.sai_thrift_get_port_attribute(port)
+        attr_list = port_attr_list.attr_list
+        for attribute in attr_list:
+            if attribute.id == SAI_PORT_ATTR_OPER_STATUS:
+                if attribute.value.s32 == SAI_PORT_OPER_STATUS_UP:
+                    print('port 0x%x is up' % port)
+
+    transport.close()
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Thrift.TException as tx:
+        print('%s' % tx.message)

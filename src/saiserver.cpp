@@ -34,7 +34,6 @@ extern "C" {
 sai_switch_api_t* sai_switch_api;
 
 std::map<std::string, std::string> gProfileMap;
-std::map<std::set<int>, std::string> gPortMap;
 
 extern std::vector<std::pair<sai_fdb_entry_t, sai_object_id_t>> gFdbMap;
 
@@ -129,13 +128,6 @@ void on_port_state_change(_In_ uint32_t count,
 void on_shutdown_request(_In_ sai_object_id_t switch_id) {
 }
 
-void on_packet_event(_In_ sai_object_id_t switch_id,
-    _In_ const void *buffer,
-    _In_ sai_size_t buffer_size,
-    _In_ uint32_t attr_count,
-    _In_ const sai_attribute_t *attr_list) {
-}
-
 // Profile services
 /* Get variable value given its name */
 const char* test_profile_get_value(
@@ -216,8 +208,6 @@ void sai_diag_shell() {
 
 struct cmdOptions {
   std::string profileMapFile;
-  std::string portMapFile;
-  std::string initScript;
 };
 
 cmdOptions handleCmdLine(int argc, char **argv) {
@@ -227,8 +217,6 @@ cmdOptions handleCmdLine(int argc, char **argv) {
   while(true) {
     static struct option long_options[] = {
       { "profile",          required_argument, 0, 'p' },
-      { "portmap",          required_argument, 0, 'f' },
-      { "init-script",      required_argument, 0, 'S' },
       { 0,                  0,                 0,  0  }
     };
 
@@ -246,18 +234,8 @@ cmdOptions handleCmdLine(int argc, char **argv) {
       options.profileMapFile = std::string(optarg);
       break;
 
-    case 'f':
-      printf("port map file: %s\n", optarg);
-      options.portMapFile = std::string(optarg);
-      break;
-
-    case 'S':
-      printf("init script: %s\n", optarg);
-      options.initScript = std::string(optarg);
-      break;
-
     default:
-      fprintf(stderr, "Usage: %s [-p profile_map] [-f port_map.ini] [-S init.rc]\n", argv[0]);
+      fprintf(stderr, "Usage: %s [-p sai.profile]\n", argv[0]);
       exit(EXIT_FAILURE);
     }
   }
@@ -301,66 +279,9 @@ void handleProfileMap(const std::string& profileMapFile) {
   }
 }
 
-void handlePortMap(const std::string& portMapFile) {
-
-  if (portMapFile.size() == 0) {
-    return;
-  }
-
-  std::ifstream portmap(portMapFile);
-
-  if (!portmap.is_open()) {
-    printf("failed to open port map file: %s : %s\n", portMapFile.c_str(), strerror(errno));
-    exit(EXIT_FAILURE);
-  }
-
-  std::string line;
-
-  while(getline(portmap, line)) {
-    if (line.size() > 0 && (line[0] == '#' || line[0] == ';')) {
-      continue;
-    }
-
-    size_t pos = line.find(" ");
-
-    if (pos == std::string::npos) {
-      printf("not found ' ' in line %s\n", line.c_str());
-      continue;
-    }
-
-    std::string fp_value = line.substr(0, pos);
-    std::string lanes    = line.substr(pos + 1);
-
-    // ::isspace : C-Style white space predicate. Locale independent.
-    lanes.erase(std::remove_if(lanes.begin(), lanes.end(), ::isspace), lanes.end());
-
-    std::istringstream iss(lanes);
-    std::string lane_str;
-    std::set<int> lane_set;
-
-    while (getline(iss, lane_str, ',')) {
-      int lane = stoi(lane_str);
-      lane_set.insert(lane);
-    }
-
-    gPortMap.insert(std::pair<std::set<int>,std::string>(lane_set,fp_value));
-  }
-}
-
-void handleInitScript(const std::string& initScript) {
-
-  if (initScript.size() == 0) {
-    return;
-  }
-
-  printf("Running %s ...\n", initScript.c_str());
-  system(initScript.c_str());
-}
-
 int main(int argc, char* argv[]) {
   auto options = handleCmdLine(argc, argv);
   handleProfileMap(options.profileMapFile);
-  handlePortMap(options.portMapFile);
 
   auto status = sai_api_initialize(0, (sai_service_method_table_t *)&test_services);
   if (status == SAI_STATUS_SUCCESS) {
@@ -408,19 +329,6 @@ int main(int argc, char* argv[]) {
     printf("Error: Failed to create switch: %d \n", status);
     exit(EXIT_FAILURE);
   }
-
-  //in case of the brcm switch not (!defined(INCLUDE_KNET) && !defined(BCMSIM))
-#ifndef BRCMSAI
-  sai_attribute_t attr_pkt;
-  attr_pkt.id = SAI_SWITCH_ATTR_PACKET_EVENT_NOTIFY;
-  attr_pkt.value.ptr = reinterpret_cast<sai_pointer_t>(&on_packet_event);
-  status = sai_switch_api->set_switch_attribute(gSwitchId, &attr_pkt);
-  if (status != SAI_STATUS_SUCCESS) {
-    printf("Warn: Failed to set_switch_attribute SAI_SWITCH_ATTR_PACKET_EVENT_NOTIFY : %d \n", status);
-  }
-#endif
-
-  handleInitScript(options.initScript);
 
   std::thread diag_shell_thread = std::thread(sai_diag_shell);
   diag_shell_thread.detach();
