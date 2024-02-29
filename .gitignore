@@ -5,4 +5,5 @@ src/obj/**
 *.ini
 .*.sw?
 
+__pycache__/
 saiserver

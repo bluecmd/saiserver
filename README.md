@@ -19,10 +19,19 @@ sudo rmmod psample
 sudo ./saiserver -p sai.profile
 ```
 
+## Re-generate SAI Python library
+
+```
+pip3 install --user ctypesgen
+ctypesgen ~/Downloads/SAI/inc/sai*.h -I ~/Downloads/SAI/inc -I ~/Downloads/SAI/experimental/ -o sai_types.py
+# or
+ctypesgen /usr/include/sai/sai*.h -I /usr/include/sai/ -I /usr/include/sai/experimental/ -o sai_types.py
+```
+
 ## Example run
 
 ```
-admin@sonic:~/saiserver$ sudo ./saiserver -p sai.profile 
+admin@sonic:~/saiserver$ sudo ./saiserver -p sai.profile
 profile map file: sai.profile
 insert: SAI_INIT_CONFIG_FILE:config.bcm
 resetting profile map iteratorkey: SAI_INIT_CONFIG_FILE:config.bcmiterator reached endFound 0 devices.
