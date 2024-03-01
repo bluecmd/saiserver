@@ -32,6 +32,20 @@ extern "C" {
 
 #define SWITCH_SAI_THRIFT_RPC_SERVER_PORT 9090
 
+typedef struct {
+  const char* sai_api_version;
+  const char* bcm_sai_version;
+  const char* build_release;
+  /* these are only populated after create_switch */
+  const char* cancun_version;
+  const char* npl_version;
+} brcm_sai_version_t;
+
+extern "C" {
+extern brcm_sai_version_t* brcm_sai_version_get(brcm_sai_version_t*) __attribute__((weak));
+extern void ifcs_get_version(int* major, int* minor, int* rev) __attribute__((weak));
+}
+
 sai_switch_api_t* sai_switch_api;
 
 std::map<std::string, std::string> gProfileMap;
@@ -293,8 +307,29 @@ int main(int argc, char* argv[]) {
     int rev = version - major * 10000 - minor * 100;
     printf("================================\n");
     printf("  Loaded SAI version %d.%d.%d\n", major, minor, rev);
-    printf("================================\n");
   }
+
+  if (brcm_sai_version_get != NULL) {
+    brcm_sai_version_t brcm_version;
+    brcm_sai_version_get(&brcm_version);
+    printf(
+        "\n  Broadcom SAI detected\n    SAI API version: %s\n    BRCM SAI version: %s\n    Build release: %s\n",
+        brcm_version.sai_api_version,
+        brcm_version.bcm_sai_version,
+        brcm_version.build_release);
+  }
+
+  if (ifcs_get_version != NULL) {
+    int major = 0;
+    int minor = 0;
+    int rev = 0;
+    ifcs_get_version(&major, &minor, &rev);
+    printf(
+        "\n  Innovium SAI detected\n    IFCS version: %d.%d.%d\n",
+        major, minor, rev);
+  }
+
+  printf("================================\n");
 
   auto status = sai_api_initialize(0, (sai_service_method_table_t *)&test_services);
   if (status == SAI_STATUS_SUCCESS) {
