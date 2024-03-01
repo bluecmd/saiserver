@@ -26,6 +26,7 @@
 extern "C" {
 #include "sai.h"
 #include "saistatus.h"
+#include "saiversion.h"
 }
 
 
@@ -282,8 +283,18 @@ void handleProfileMap(const std::string& profileMapFile) {
 }
 
 int main(int argc, char* argv[]) {
+  sai_api_version_t version;
   auto options = handleCmdLine(argc, argv);
   handleProfileMap(options.profileMapFile);
+
+  if (sai_query_api_version(&version) == SAI_STATUS_SUCCESS) {
+    int major = version / 10000;
+    int minor = (version - major * 10000) / 100;
+    int rev = version - major * 10000 - minor * 100;
+    printf("================================\n");
+    printf("  Loaded SAI version %d.%d.%d\n", major, minor, rev);
+    printf("================================\n");
+  }
 
   auto status = sai_api_initialize(0, (sai_service_method_table_t *)&test_services);
   if (status == SAI_STATUS_SUCCESS) {
