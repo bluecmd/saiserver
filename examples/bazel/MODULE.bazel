@@ -1,0 +1,16 @@
+module(name = "saiserver_consumer")
+
+bazel_dep(name = "saiserver", version = "0.1.0")
+bazel_dep(name = "rules_cc", version = "0.2.17")
+bazel_dep(name = "rules_rust", version = "0.75.0")
+bazel_dep(name = "toolchains_llvm_bootstrapped", version = "0.5.9")
+
+# Development-only: exercise this checkout as an external Bzlmod dependency.
+# In production replace this with a commit-pinned git/archive override.
+local_path_override(module_name = "saiserver", path = "../..")
+
+# rules_rust deliberately accepts toolchain configuration only from the root.
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(edition = "2021", versions = ["1.94.0"], rustfmt_version = "1.94.0")
+use_repo(rust, "rust_toolchains")
+register_toolchains("@rust_toolchains//:all")

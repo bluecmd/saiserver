@@ -37,6 +37,28 @@ for the full-resolution H.264 videos. [Source capture and regeneration](docs/med
 
 </details>
 
+## Hermetic Bazel / Bzlmod build
+
+On Linux x86_64, use the digest-pinned bootstrap (Docker or Podman):
+
+```sh
+./bazelw build //:client //:server
+./bazelw test //...
+```
+
+The bootstrap pins Bazel **9.3.1** and its Linux/Bash/coreutils environment.
+Bazel downloads pinned Rust/LLVM toolchains, Thrift sources and SAI headers;
+no installed compiler, Cargo, Thrift or vendor SDK is needed for the build.
+The standalone server requires an explicit `SAI_LIBRARY_PATH` **at runtime**.
+Native `bazel`/Bazelisk commands also work, but do not pin the host bootstrap
+userspace; use `bazelw` for the fully hermetic configuration.
+
+Public targets include `@saiserver//:client_lib`, `:server_lib`, `:sai_headers`,
+`:thrift_idl`, `:thrift_cpp` and `:thrift_rust`.
+See [Bazel targets, hermeticity boundary, SDK deployment and downstream use](docs/bazel.md)
+and the [separate Bzlmod consumer example](examples/bazel).
+The existing Cargo/Make workflows remain available below.
+
 ## Run the TUI
 
 Requires Rust 1.89+ and an **already running compatible saiserver**:
