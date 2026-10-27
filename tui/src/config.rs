@@ -15,7 +15,7 @@ use std::{
     sync::Arc,
 };
 
-pub const MAX_OPERATIONS: usize = 256;
+pub const MAX_OPERATIONS: usize = 512;
 pub type Attributes = BTreeMap<String, AttributeValue>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,6 +51,7 @@ impl ObjectRef {
 pub enum AttributeValue {
     Literal(String),
     Reference(ObjectRef),
+    References(Vec<ObjectRef>),
     NullOid,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -112,10 +113,13 @@ impl Operation {
             _ => None,
         };
         if let Some(attrs) = attrs {
-            refs.extend(attrs.values().filter_map(|v| match v {
-                AttributeValue::Reference(r) => Some(r),
-                _ => None,
-            }));
+            for value in attrs.values() {
+                match value {
+                    AttributeValue::Reference(r) => refs.push(r),
+                    AttributeValue::References(list) => refs.extend(list),
+                    _ => (),
+                }
+            }
         }
         refs
     }
@@ -160,8 +164,22 @@ impl Operation {
                         }
                         command::oid(&object.key, false)?
                     }
+                    (Value::OidList(kinds), AttributeValue::References(references)) => references
+                        .iter()
+                        .map(|reference| {
+                            let object = reference.resolve(bindings)?;
+                            if !kinds.contains(&object.kind.as_str()) {
+                                return Err(format!(
+                                    "{kind}.{name}: wrong reference kind {}",
+                                    object.kind
+                                ));
+                            }
+                            command::oid(&object.key, false)
+                        })
+                        .collect::<Result<Vec<_>, String>>()?
+                        .join(","),
                     (Value::Oid(_, true), AttributeValue::NullOid) => "0x0".into(),
-                    (Value::Oid(..), _) => {
+                    (Value::Oid(..) | Value::OidList(..), _) => {
                         return Err(format!(
                             "{kind}.{name}: requires a typed reference (or permitted null)"
                         ))
@@ -221,7 +239,7 @@ impl PortIdentity {
         let lanes = attrs
             .get("lanes")
             .map(|s| -> Result<Vec<u32>, String> {
-                let lanes = s
+                let mut lanes = s
                     .split(',')
                     .map(|n| {
                         n.parse::<u32>()
@@ -231,6 +249,7 @@ impl PortIdentity {
                 if lanes.is_empty() || lanes.iter().collect::<BTreeSet<_>>().len() != lanes.len() {
                     return Err("invalid/duplicate port lanes".into());
                 }
+                lanes.sort_unstable();
                 Ok(lanes)
             })
             .transpose()?;
@@ -432,7 +451,7 @@ pub struct ApplyApproval {
     revision: Arc<()>,
     ticket: Arc<()>,
 }
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Staging {
     current: Option<(Plan, Validation)>,
     revision: Arc<()>,

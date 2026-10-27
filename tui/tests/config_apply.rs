@@ -410,7 +410,7 @@ fn whole_plan_rejects_invalid_final_steps_types_injection_and_bounds_locally() {
             existing("port", "1"),
             &[("admin", V::Reference(existing("port", "1")))],
         ),
-        set(existing("port", "1"), &[("speed", literal("25000"))]),
+        set(existing("port", "1"), &[("speed", literal("0"))]),
         create(
             "vlan_member",
             "m",

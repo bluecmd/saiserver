@@ -26,7 +26,8 @@ pub struct StepAudit {
     pub command: Command,
     pub mutation_sent: bool,
     pub verified: bool,
-    /// Complete independent getter/snapshot evidence, including errors.
+    /// Independent getter evidence and snapshot summary, including errors.
+    /// Full latest inventory is retained once on ApplyReport, not per step.
     pub outcome: Outcome,
 }
 #[derive(Debug)]
@@ -102,6 +103,7 @@ pub fn apply(
             claimed_keys.insert(command::oid(oid, false).expect("full prevalidation"));
         }
     }
+    let mut audit_bytes = 0usize;
     for (index, operation) in plan.operations.iter().enumerate() {
         if cancelled.load(Ordering::Acquire) {
             return report.stop(ApplyStatus::Cancelled);
@@ -125,7 +127,7 @@ pub fn apply(
             sent: false,
             before: None,
         };
-        let outcome = client::execute(
+        let mut outcome = client::execute(
             &mut guarded,
             &command,
             command::approve(&command, true).expect("validated mutation"),
@@ -145,8 +147,27 @@ pub fn apply(
             )
         };
         let verified = binding.is_ok();
-        if let Some(inventory) = &outcome.inventory {
-            report.inventory = Some(inventory.clone());
+        if let Some(inventory) = outcome.inventory.take() {
+            report.inventory = Some(inventory);
+        }
+        if let Some(snapshot) = outcome
+            .value
+            .get_mut("snapshot")
+            .and_then(|v| v.get_mut("value"))
+            .and_then(|v| v.as_object_mut())
+        {
+            if let Some(objects) = snapshot.remove("objects") {
+                snapshot.insert(
+                    "object_count".into(),
+                    serde_json::json!(objects.as_array().map(Vec::len)),
+                );
+                snapshot.insert("notice".into(), serde_json::json!("Full latest inventory retained once in apply report; per-step snapshot objects omitted to bound audit size"));
+            }
+        }
+        audit_bytes = audit_bytes.saturating_add(outcome.value.to_string().len());
+        let audit_limit = audit_bytes > 8 * 1024 * 1024;
+        if audit_limit {
+            outcome.value = serde_json::json!({"error":"audit byte limit reached; current step details omitted; inspect actual inventory before further changes", "step_verified":verified});
         }
         report.steps.push(StepAudit {
             index,
@@ -155,6 +176,12 @@ pub fn apply(
             verified,
             outcome,
         });
+        if audit_limit {
+            return report.stop(ApplyStatus::Failed {
+                step: index,
+                reason: "bounded audit limit reached; remaining mutations not sent".into(),
+            });
+        }
         match binding {
             Ok(Some((symbol, object))) => {
                 report.bindings.insert(symbol, object);

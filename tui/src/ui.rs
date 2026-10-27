@@ -1,6 +1,9 @@
 use crate::{
+    apply::{self, ApplyReport, ApplyStatus},
     client::{self, Client, Failure, Outcome, Service},
     command::{self, Approval, Command},
+    config::{ApplyApproval, Staging},
+    preset_plan,
     presets::{self, BoundPreset},
     rates::{RateSample, Rates, COUNTERS},
     sai_tui::{Inventory, Object},
@@ -25,7 +28,11 @@ use ratatui::{
 use std::{
     collections::BTreeMap,
     io::{self, stdout},
-    sync::mpsc::{self, Receiver, SyncSender},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, SyncSender},
+        Arc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -38,7 +45,12 @@ fn on_page(page: usize, kind: &str) -> bool {
         2 => kind == "fdb",
         3 => matches!(
             kind,
-            "virtual_router" | "router_interface" | "neighbor" | "route" | "next_hop"
+            "virtual_router"
+                | "router_interface"
+                | "interface_address"
+                | "neighbor"
+                | "route"
+                | "next_hop"
         ),
         4 => kind.starts_with("acl_"),
         _ => false,
@@ -50,14 +62,46 @@ enum Job {
     Get(String, String),
     Run(Command, Option<Approval>),
     Counters(String),
+    Apply(Box<Staging>, ApplyApproval, BoundPreset),
 }
 enum Reply {
     Snapshot(Result<Inventory, Failure>),
     Get(Result<Object, Failure>),
     Run(Outcome),
     Counters(String, Instant, Result<BTreeMap<String, u64>, Failure>),
+    Applied(Box<Staging>, ApplyReport),
 }
-fn worker(mut client: Client) -> (SyncSender<Job>, Receiver<Reply>) {
+fn apply_job(
+    service: &mut impl Service,
+    mut staging: Box<Staging>,
+    approval: ApplyApproval,
+    bound: BoundPreset,
+    cancelled: &AtomicBool,
+) -> Reply {
+    let fresh = service.snapshot();
+    let check = fresh
+        .as_ref()
+        .map_err(|e| e.to_string())
+        .and_then(|inventory| {
+            let plan = preset_plan::build(&bound, inventory)?;
+            if staging.plan() != Some(&plan) {
+                return Err("configuration changed since review; reload and review again".into());
+            }
+            Ok(())
+        });
+    let report = match check {
+        Ok(()) => apply::apply(&mut staging, Some(approval), service, cancelled),
+        Err(error) => ApplyReport {
+            status: ApplyStatus::Rejected(error),
+            steps: vec![],
+            bindings: BTreeMap::new(),
+            inventory: fresh.ok(),
+            partial_effects: false,
+        },
+    };
+    Reply::Applied(staging, report)
+}
+fn worker(mut client: Client, cancelled: Arc<AtomicBool>) -> (SyncSender<Job>, Receiver<Reply>) {
     let (tx, rx) = mpsc::sync_channel(1);
     let (done, out) = mpsc::sync_channel(1);
     thread::spawn(move || {
@@ -66,6 +110,9 @@ fn worker(mut client: Client) -> (SyncSender<Job>, Receiver<Reply>) {
                 Job::Snapshot => Reply::Snapshot(client.snapshot()),
                 Job::Get(k, v) => Reply::Get(client.get(&k, &v)),
                 Job::Run(cmd, approval) => Reply::Run(client::execute(&mut client, &cmd, approval)),
+                Job::Apply(staging, approval, bound) => {
+                    apply_job(&mut client, staging, approval, bound, &cancelled)
+                }
                 Job::Counters(key) => {
                     let result = client.counters(&key);
                     Reply::Counters(key, Instant::now(), result)
@@ -77,6 +124,12 @@ fn worker(mut client: Client) -> (SyncSender<Job>, Receiver<Reply>) {
         }
     });
     (tx, out)
+}
+struct ApplyCancelGuard(Arc<AtomicBool>);
+impl Drop for ApplyCancelGuard {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
 }
 #[cfg(unix)]
 struct SignalGuard(Vec<signal_hook::SigId>);
@@ -101,6 +154,7 @@ impl Drop for TerminalGuard {
 enum ReviewAction {
     Mutation(Command),
     LoadPreset(BoundPreset),
+    ApplyPreset,
 }
 struct Review {
     text: String,
@@ -116,6 +170,7 @@ struct App {
     input: Option<String>,
     review: Option<Review>,
     staged: Option<BoundPreset>,
+    staging: Staging,
     details: String,
     scroll: u16,
     counters: BTreeMap<String, u64>,
@@ -160,6 +215,10 @@ impl App {
             Err(e) => {
                 self.failed = true;
                 self.status = format!("worker unavailable: {e}; quit and reconnect");
+                let (mpsc::TrySendError::Full(job) | mpsc::TrySendError::Disconnected(job)) = e;
+                if let Job::Apply(staging, _, _) = job {
+                    self.staging = *staging;
+                }
                 false
             }
         }
@@ -175,12 +234,37 @@ impl App {
     }
     fn show_presets(&mut self) {
         self.details = format!(
-            "SWITCH CONFIGURATION PRESETS\n{}\n\n:presets lists presets; :preset load ID reviews a staged replacement.\n:preset show displays the staged configuration. Loading NEVER applies hardware changes.\nStock port lanes and speeds must match discovery. No automatic breakout changes.\nERSPAN uses a static example destination MAC; configure the collector accordingly.\nApplication is a separate explicit action.",
+            "SWITCH CONFIGURATION PRESETS\n{}\n\n:presets lists presets; :preset load ID reviews a staged replacement.\n:preset show displays the staged configuration. Loading NEVER applies hardware changes.\nStock port lanes and speeds must match discovery. No automatic breakout changes.\nERSPAN uses a static example destination MAC; configure the collector accordingly.\nPress a (or :preset apply) to REVIEW application as a separate explicit action.",
             presets::catalog().iter().map(|(id, title)| format!("{id}\n  {title}")).collect::<Vec<_>>().join("\n")
         );
         self.scroll = 0;
     }
+    fn prepare_apply(&mut self) -> Result<(), String> {
+        if self.busy {
+            return Err("wait for active RPC before reviewing apply".into());
+        }
+        let bound = self
+            .staged
+            .as_ref()
+            .ok_or("no staged configuration; press p to load")?;
+        let plan = preset_plan::build(bound, &self.inventory)?;
+        if self.staging.plan() != Some(&plan) {
+            return Err("configuration changed; reload and review again".into());
+        }
+        self.details = format!("REVIEW HARDWARE APPLICATION — {} operations\n{}\n\nDefault VLAN memberships listed below will be removed. This is NOT a transaction: no rollback or automatic retry.\nStops at first failure or uncertain readback; quitting stops remaining steps, not an already-sent mutation.\nIPv6 is static/no-DAD; verify address uniqueness. No dynamic neighbor learning or ICMP echo service.\nInventory is limited; undiscovered dependencies may cause partial failure.\n\n{:#?}\n\ny APPLIES ONCE; n/Esc cancels without changing hardware or staged state.", plan.operations.len(), plan.title, plan.operations);
+        self.review = Some(Review {
+            text: "preset apply".into(),
+            action: ReviewAction::ApplyPreset,
+        });
+        self.scroll = 0;
+        self.status =
+            "REVIEW APPLY: y sends the displayed hardware operations ONCE; n/Esc cancels.".into();
+        Ok(())
+    }
     fn confirm_review(&mut self) -> Result<(), String> {
+        if self.busy {
+            return Err("wait for active RPC before confirmation".into());
+        }
         let Some(review) = self.review.take() else {
             return Ok(());
         };
@@ -189,9 +273,21 @@ impl App {
                 let approval = command::approve(&cmd, true)?;
                 self.dispatch(Job::Run(cmd, approval));
             }
+            ReviewAction::ApplyPreset => {
+                let bound = self.staged.clone().ok_or("no staged preset")?;
+                let plan = preset_plan::build(&bound, &self.inventory)?;
+                if self.staging.plan() != Some(&plan) {
+                    return Err("configuration changed; reload and review again".into());
+                }
+                let approval = self.staging.approve(true)?;
+                let staging = Box::new(std::mem::take(&mut self.staging));
+                self.dispatch(Job::Apply(staging, approval, bound));
+            }
             ReviewAction::LoadPreset(bound) => {
                 // Revalidate current discovery before replacing the old local state.
                 let bound = presets::bind(bound.preset, &self.inventory)?;
+                let plan = preset_plan::build(&bound, &self.inventory)?;
+                self.staging.load(plan, &self.inventory, true)?;
                 self.details =
                     serde_json::to_string_pretty(&bound.preset).map_err(|e| e.to_string())?;
                 self.staged = Some(bound);
@@ -213,6 +309,13 @@ impl App {
             return;
         }
         if words.first() == Some(&"preset") {
+            if words.as_slice() == ["preset", "apply"] {
+                if let Err(error) = self.prepare_apply() {
+                    self.failed = true;
+                    self.status = error;
+                }
+                return;
+            }
             if words.as_slice() == ["preset", "show"] {
                 self.details = self
                     .staged
@@ -235,7 +338,12 @@ impl App {
                 self.status = "Wait for the active RPC before loading a preset".into();
                 return;
             }
-            match presets::get(words[2]).and_then(|p| presets::bind(p, &self.inventory)) {
+            match presets::get(words[2])
+                .and_then(|p| presets::bind(p, &self.inventory))
+                .and_then(|bound| {
+                    preset_plan::build(&bound, &self.inventory)?;
+                    Ok(bound)
+                }) {
                 Ok(bound) => {
                     self.details = format!("REPLACE STAGED CONFIGURATION ONLY — NO HARDWARE APPLICATION\nPrevious staged preset: {}\n\n{}\n\ny replaces local staged state; n/Esc preserves it. Applying is a SEPARATE confirmed action.\nAddresses require the operational server ARP/NDP service; RIFs alone are not addressed interfaces.\nStatic ERSPAN destination MAC is an example, not discovered from the collector.", self.staged.as_ref().map(|s| s.preset.title.as_str()).unwrap_or("none"), serde_json::to_string_pretty(&bound.preset).unwrap_or_default());
                     self.review = Some(Review {
@@ -296,6 +404,20 @@ impl App {
     fn reply(&mut self, reply: Reply) {
         self.busy = false;
         match reply {
+            Reply::Applied(staging, report) => {
+                self.staging = *staging;
+                self.failed = report.status != ApplyStatus::Completed;
+                self.status = format!("Preset apply {:?}: {} verified steps; partial effects={}. No retry/rollback. Inspect audit.", report.status, report.completed_steps(), report.partial_effects);
+                self.details = serde_json::to_string_pretty(&serde_json::json!({
+                    "status": format!("{:?}", report.status), "partial_effects": report.partial_effects,
+                    "steps": report.steps.iter().map(|s| serde_json::json!({"index":s.index,"command":format!("{:?}",s.command),"mutation_sent":s.mutation_sent,"verified":s.verified,"outcome":s.outcome.value})).collect::<Vec<_>>()
+                })).unwrap_or_default();
+                if let Some(inventory) = report.inventory {
+                    self.inventory = inventory;
+                }
+                self.scroll = 0;
+                self.last_rate = self.rates.disconnected("preset apply completed or stopped");
+            }
             Reply::Snapshot(result) => {
                 match result {
                     Ok(i) => {
@@ -394,7 +516,9 @@ pub fn run(client: Client, interval: Duration) -> io::Result<()> {
     execute!(stdout(), EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     terminal.clear()?;
-    let (tx, rx) = worker(client);
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let _apply_cancel = ApplyCancelGuard(cancelled.clone());
+    let (tx, rx) = worker(client, cancelled);
     let mut app = App {
         inventory: Inventory::default(),
         page: 0,
@@ -405,6 +529,7 @@ pub fn run(client: Client, interval: Duration) -> io::Result<()> {
         input: None,
         review: None,
         staged: None,
+        staging: Staging::default(),
         details: String::new(),
         scroll: 0,
         counters: BTreeMap::new(),
@@ -523,6 +648,12 @@ pub fn run(client: Client, interval: Duration) -> io::Result<()> {
             KeyCode::Enter | KeyCode::Char('g') => {
                 if let Some((k, v)) = app.target() {
                     app.dispatch(Job::Get(k, v));
+                }
+            }
+            KeyCode::Char('a') => {
+                if let Err(error) = app.prepare_apply() {
+                    app.failed = true;
+                    app.status = error;
                 }
             }
             KeyCode::Char('p') => {
@@ -798,12 +929,13 @@ fn draw(frame: &mut ratatui::Frame<'_>, app: &mut App, endpoint: &str) {
     let bottom = if let Some(review) = &app.review {
         match &review.action {
             ReviewAction::Mutation(cmd) => format!("REVIEW MUTATION: {}\nParsed: {cmd:?}\nMay change live hardware. No rollback. y CONFIRM / n or Esc CANCEL", review.text),
+            ReviewAction::ApplyPreset => "REVIEW HARDWARE APPLY: y APPLIES ONCE / n or Esc CANCEL\nMay change live hardware. No rollback or retries. Quitting stops only unsent operations.".into(),
             ReviewAction::LoadPreset(_) => format!("REVIEW LOCAL LOAD: {}\nReplaces staged configuration ONLY; does NOT apply hardware.\ny LOAD / n or Esc CANCEL", review.text),
         }
     } else if let Some(input) = &app.input {
         format!(":{input}\nEnter validate/review; Esc cancel. Field help is above; no mutation on Enter alone.")
     } else {
-        "p switch presets | : command | c create | e edit | d remove (review) | ? help | w warnings | l live | r reconnect | Enter getter".into()
+        "p load preset | a apply staged (review) | : command | c create | e edit | d remove (review) | ? help | w warnings | l live | r reconnect | Enter getter".into()
     };
     frame.render_widget(
         Paragraph::new(bottom).wrap(Wrap { trim: false }).block(
@@ -835,6 +967,7 @@ mod tests {
             input: None,
             review: None,
             staged: None,
+            staging: Staging::default(),
             details: String::new(),
             scroll: 0,
             counters: BTreeMap::new(),
@@ -849,31 +982,7 @@ mod tests {
     #[test]
     fn staged_preset_confirmation_cancellation_and_invalid_load_send_no_rpc() {
         let (mut app, rx) = test_app();
-        let preset = presets::get(presets::SEASTONE2_ID).unwrap();
-        app.inventory.objects = Some(
-            preset
-                .ports
-                .iter()
-                .enumerate()
-                .map(|(i, port)| {
-                    Object::new(
-                        "port".to_owned(),
-                        format!("0x{:x}", i + 1),
-                        BTreeMap::from([
-                            (
-                                "lanes".into(),
-                                port.lanes
-                                    .iter()
-                                    .map(u32::to_string)
-                                    .collect::<Vec<_>>()
-                                    .join(","),
-                            ),
-                            ("speed".into(), port.speed_mbps.to_string()),
-                        ]),
-                    )
-                })
-                .collect(),
-        );
+        app.inventory = preset_plan::fixture();
         let load = format!("preset load {}", presets::SEASTONE2_ID);
         app.prepare(load.clone());
         assert!(matches!(
@@ -909,6 +1018,32 @@ mod tests {
         app.prepare(load);
         assert!(app.failed);
         assert_eq!(app.staged, old);
+        assert!(rx.try_recv().is_err());
+    }
+    #[test]
+    fn applying_requires_separate_confirmation_and_cancellation_preserves_stage() {
+        let (mut app, rx) = test_app();
+        app.inventory = preset_plan::fixture();
+        app.prepare(format!("preset load {}", presets::SEASTONE2_ID));
+        app.confirm_review().unwrap();
+        let original = app.staging.plan().cloned();
+        assert!(rx.try_recv().is_err());
+        app.prepare_apply().unwrap();
+        assert!(matches!(
+            app.review.as_ref().map(|r| &r.action),
+            Some(ReviewAction::ApplyPreset)
+        ));
+        assert!(rx.try_recv().is_err());
+        app.cancel_review();
+        assert_eq!(app.staging.plan(), original.as_ref());
+        assert!(rx.try_recv().is_err());
+        app.prepare("preset apply".into());
+        app.confirm_review().unwrap();
+        match rx.try_recv().unwrap() {
+            Job::Apply(staging, _, _) => assert_eq!(staging.plan(), original.as_ref()),
+            _ => panic!("separate apply job required"),
+        }
+        assert!(app.busy);
         assert!(rx.try_recv().is_err());
     }
     #[test]

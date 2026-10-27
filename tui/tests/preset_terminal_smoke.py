@@ -34,7 +34,13 @@ def snapshot():
         ports.append(obj("port", hex(i + 1), {
             "lanes": ",".join(map(str, lanes)),
             "speed": "100000" if i < 32 else "10000",
+            "ingress_acl": "0x0", "egress_acl": "0x0",
+            "egress_mirror_sessions": "", "pvid": "1",
         }))
+    ports.append(obj("switch", "0x1000", {
+        "src_mac": "02:00:00:00:01:01", "default_vlan": "0x1001",
+        "preset_api": "1", "interface_address_backend": "enabled",
+    }))
     return (field(15, 1, struct.pack("!bi", 12, len(ports)) + b"".join(ports))
             + field(15, 2, struct.pack("!bi", 11, 0)) + b"\0")
 
@@ -101,6 +107,10 @@ class PresetTerminalSmoke(terminal_smoke.TerminalSmoke):
                 self.until(master, b"REVIEW LOCAL LOAD")
                 os.write(master, b"y")
                 self.until(master, b"Preset staged locally")
+                os.write(master, b"a")
+                self.until(master, b"REVIEW HARDWARE APPLY")
+                os.write(master, b"n")
+                self.until(master, b"Cancelled")
                 self.assert_restored(process, master, slave, original)
             finally:
                 stop.set()
