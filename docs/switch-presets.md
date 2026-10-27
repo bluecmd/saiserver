@@ -41,7 +41,12 @@ is rejected rather than silently replacing them.
 Quitting cancels remaining operations. It does not cancel an already-sent
 mutation, undo prior steps, or guarantee that a timed-out create did not happen.
 Each RPC has its normal timeout; the multi-step operation can take much longer
-than one RPC. The UI remains responsive while the bounded worker runs.
+than one RPC. The UI remains responsive while the bounded worker runs. On quit
+during an apply, the TUI waits (bounded) for the in-flight step and its
+readback, restores the terminal, and prints the apply audit to stderr.
+
+After an apply that sent any mutation but did not complete, the staged preset
+is cleared: a new apply requires reloading and reviewing the preset again.
 
 Plans have a 512-operation ceiling and an 8 MiB audit budget. Per-step audits
 retain mutation/getter evidence and snapshot summaries; only the latest complete

@@ -101,6 +101,15 @@ fn apply_job(
     };
     Reply::Applied(staging, report)
 }
+fn apply_summary(report: &ApplyReport) -> String {
+    format!("Preset apply {:?}: {} verified steps; partial effects={}. No retry/rollback. Inspect audit.", report.status, report.completed_steps(), report.partial_effects)
+}
+fn apply_audit(report: &ApplyReport) -> String {
+    serde_json::to_string_pretty(&serde_json::json!({
+        "status": format!("{:?}", report.status), "partial_effects": report.partial_effects,
+        "steps": report.steps.iter().map(|s| serde_json::json!({"index":s.index,"command":format!("{:?}",s.command),"mutation_sent":s.mutation_sent,"verified":s.verified,"outcome":s.outcome.value})).collect::<Vec<_>>()
+    })).unwrap_or_default()
+}
 fn worker(mut client: Client, cancelled: Arc<AtomicBool>) -> (SyncSender<Job>, Receiver<Reply>) {
     let (tx, rx) = mpsc::sync_channel(1);
     let (done, out) = mpsc::sync_channel(1);
@@ -179,6 +188,8 @@ struct App {
     counter_key: Option<String>,
     next_poll: Instant,
     tx: SyncSender<Job>,
+    /// A preset apply is outstanding; quitting must wait for its audit.
+    applying: bool,
 }
 impl App {
     fn objects(&self) -> Vec<&Object> {
@@ -205,9 +216,11 @@ impl App {
             self.status = "Busy: bounded worker has one outstanding request; wait or quit".into();
             return false;
         }
+        let applying = matches!(job, Job::Apply(..));
         match self.tx.try_send(job) {
             Ok(()) => {
                 self.busy = true;
+                self.applying = applying;
                 self.status =
                     "RPC in progress (bounded timeout); mutations are never retried".into();
                 true
@@ -403,15 +416,20 @@ impl App {
     }
     fn reply(&mut self, reply: Reply) {
         self.busy = false;
+        self.applying = false;
         match reply {
             Reply::Applied(staging, report) => {
                 self.staging = *staging;
                 self.failed = report.status != ApplyStatus::Completed;
-                self.status = format!("Preset apply {:?}: {} verified steps; partial effects={}. No retry/rollback. Inspect audit.", report.status, report.completed_steps(), report.partial_effects);
-                self.details = serde_json::to_string_pretty(&serde_json::json!({
-                    "status": format!("{:?}", report.status), "partial_effects": report.partial_effects,
-                    "steps": report.steps.iter().map(|s| serde_json::json!({"index":s.index,"command":format!("{:?}",s.command),"mutation_sent":s.mutation_sent,"verified":s.verified,"outcome":s.outcome.value})).collect::<Vec<_>>()
-                })).unwrap_or_default();
+                self.status = apply_summary(&report);
+                self.details = apply_audit(&report);
+                if report.partial_effects {
+                    // Re-applying the same plan would duplicate whatever was
+                    // already created; require an explicit reload instead.
+                    self.staged = None;
+                    self.status
+                        .push_str(" Staged preset cleared; reload before any new apply.");
+                }
                 if let Some(inventory) = report.inventory {
                     self.inventory = inventory;
                 }
@@ -495,7 +513,7 @@ pub fn run(client: Client, interval: Duration) -> io::Result<()> {
         let _ = execute!(stdout(), LeaveAlternateScreen, crossterm::cursor::Show);
         old(info);
     }));
-    let _guard = TerminalGuard;
+    let guard = TerminalGuard;
     #[cfg(unix)]
     let stopping = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     #[cfg(unix)]
@@ -518,7 +536,8 @@ pub fn run(client: Client, interval: Duration) -> io::Result<()> {
     terminal.clear()?;
     let cancelled = Arc::new(AtomicBool::new(false));
     let _apply_cancel = ApplyCancelGuard(cancelled.clone());
-    let (tx, rx) = worker(client, cancelled);
+    let rpc_timeout = client.timeout;
+    let (tx, rx) = worker(client, cancelled.clone());
     let mut app = App {
         inventory: Inventory::default(),
         page: 0,
@@ -538,182 +557,208 @@ pub fn run(client: Client, interval: Duration) -> io::Result<()> {
         counter_key: None,
         next_poll: Instant::now(),
         tx,
+        applying: false,
     };
     app.dispatch(Job::Snapshot);
-    loop {
-        #[cfg(unix)]
-        if stopping.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "termination signal received; an in-flight mutation may have partial effects; inspect server state"));
-        }
-        while let Ok(reply) = rx.try_recv() {
-            app.reply(reply);
-        }
-        if app.page == 5
-            && !app.busy
-            && app.review.is_none()
-            && app.input.is_none()
-            && app.details.is_empty()
-            && Instant::now() >= app.next_poll
-        {
-            if let Some((_, key)) = app.target() {
-                if app.counter_key.as_deref() != Some(&key) {
-                    app.rates.clear();
-                    app.last_rate = app.rates.disconnected("port changed");
-                    app.counters.clear();
-                    app.counter_key = Some(key.clone());
-                }
-                app.dispatch(Job::Counters(key));
-                app.next_poll = Instant::now() + interval;
+    let result = (|| -> io::Result<()> {
+        loop {
+            #[cfg(unix)]
+            if stopping.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "termination signal received; an in-flight mutation may have partial effects; inspect server state"));
             }
-        }
-        terminal.draw(|frame| draw(frame, &mut app, &endpoint.to_string()))?;
-        if !event::poll(Duration::from_millis(50))? {
-            continue;
-        }
-        let Event::Key(key) = event::read()? else {
-            continue;
-        };
-        if key.kind != KeyEventKind::Press {
-            continue;
-        }
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            break;
-        }
-        if app.review.is_some() {
+            while let Ok(reply) = rx.try_recv() {
+                app.reply(reply);
+            }
+            if app.page == 5
+                && !app.busy
+                && app.review.is_none()
+                && app.input.is_none()
+                && app.details.is_empty()
+                && Instant::now() >= app.next_poll
+            {
+                if let Some((_, key)) = app.target() {
+                    if app.counter_key.as_deref() != Some(&key) {
+                        app.rates.clear();
+                        app.last_rate = app.rates.disconnected("port changed");
+                        app.counters.clear();
+                        app.counter_key = Some(key.clone());
+                    }
+                    app.dispatch(Job::Counters(key));
+                    app.next_poll = Instant::now() + interval;
+                }
+            }
+            terminal.draw(|frame| draw(frame, &mut app, &endpoint.to_string()))?;
+            if !event::poll(Duration::from_millis(50))? {
+                continue;
+            }
+            let Event::Key(key) = event::read()? else {
+                continue;
+            };
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                break Ok(());
+            }
+            if app.review.is_some() {
+                match key.code {
+                    KeyCode::Char('y') => {
+                        if let Err(error) = app.confirm_review() {
+                            app.failed = true;
+                            app.status = format!("Confirmation rejected: {error}");
+                        }
+                    }
+                    KeyCode::Char('n') | KeyCode::Esc => {
+                        app.cancel_review();
+                    }
+                    KeyCode::PageDown => app.scroll = app.scroll.saturating_add(8),
+                    KeyCode::PageUp => app.scroll = app.scroll.saturating_sub(8),
+                    _ => {}
+                }
+                continue;
+            }
+            if let Some(input) = &mut app.input {
+                match key.code {
+                    KeyCode::Enter => {
+                        let text = app.input.take().expect("input exists");
+                        app.prepare(text);
+                    }
+                    KeyCode::Esc => {
+                        app.input = None;
+                    }
+                    KeyCode::Backspace => {
+                        input.pop();
+                    }
+                    KeyCode::PageDown => app.scroll = app.scroll.saturating_add(8),
+                    KeyCode::PageUp => app.scroll = app.scroll.saturating_sub(8),
+                    KeyCode::Char(c) if input.len() + c.len_utf8() <= 8192 => input.push(c),
+                    _ => {}
+                }
+                continue;
+            }
             match key.code {
-                KeyCode::Char('y') => {
-                    if let Err(error) = app.confirm_review() {
-                        app.failed = true;
-                        app.status = format!("Confirmation rejected: {error}");
+                KeyCode::Char('q') => break Ok(()),
+                KeyCode::Tab | KeyCode::Right => {
+                    app.page = (app.page + 1) % PAGES.len();
+                    app.selected = 0;
+                    app.reset_selection();
+                }
+                KeyCode::BackTab | KeyCode::Left => {
+                    app.page = (app.page + PAGES.len() - 1) % PAGES.len();
+                    app.selected = 0;
+                    app.reset_selection();
+                }
+                KeyCode::Char(c @ '1'..='7') => {
+                    app.page = (c as u8 - b'1') as usize;
+                    app.selected = 0;
+                    app.reset_selection();
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    app.selected = (app.selected + 1).min(app.objects().len().saturating_sub(1));
+                    app.reset_selection();
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    app.selected = app.selected.saturating_sub(1);
+                    app.reset_selection();
+                }
+                KeyCode::PageDown => app.scroll = app.scroll.saturating_add(8),
+                KeyCode::PageUp => app.scroll = app.scroll.saturating_sub(8),
+                KeyCode::Char('r') => {
+                    app.dispatch(Job::Snapshot);
+                }
+                KeyCode::Enter | KeyCode::Char('g') => {
+                    if let Some((k, v)) = app.target() {
+                        app.dispatch(Job::Get(k, v));
                     }
                 }
-                KeyCode::Char('n') | KeyCode::Esc => {
-                    app.cancel_review();
+                KeyCode::Char('a') => {
+                    if let Err(error) = app.prepare_apply() {
+                        app.failed = true;
+                        app.status = error;
+                    }
                 }
-                KeyCode::PageDown => app.scroll = app.scroll.saturating_add(8),
-                KeyCode::PageUp => app.scroll = app.scroll.saturating_sub(8),
-                _ => {}
-            }
-            continue;
-        }
-        if let Some(input) = &mut app.input {
-            match key.code {
-                KeyCode::Enter => {
-                    let text = app.input.take().expect("input exists");
-                    app.prepare(text);
+                KeyCode::Char('p') => {
+                    app.show_presets();
+                    app.input = Some(format!("preset load {}", presets::SEASTONE2_ID));
                 }
-                KeyCode::Esc => {
-                    app.input = None;
-                }
-                KeyCode::Backspace => {
-                    input.pop();
-                }
-                KeyCode::PageDown => app.scroll = app.scroll.saturating_add(8),
-                KeyCode::PageUp => app.scroll = app.scroll.saturating_sub(8),
-                KeyCode::Char(c) if input.len() + c.len_utf8() <= 8192 => input.push(c),
-                _ => {}
-            }
-            continue;
-        }
-        match key.code {
-            KeyCode::Char('q') => break,
-            KeyCode::Tab | KeyCode::Right => {
-                app.page = (app.page + 1) % PAGES.len();
-                app.selected = 0;
-                app.reset_selection();
-            }
-            KeyCode::BackTab | KeyCode::Left => {
-                app.page = (app.page + PAGES.len() - 1) % PAGES.len();
-                app.selected = 0;
-                app.reset_selection();
-            }
-            KeyCode::Char(c @ '1'..='7') => {
-                app.page = (c as u8 - b'1') as usize;
-                app.selected = 0;
-                app.reset_selection();
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                app.selected = (app.selected + 1).min(app.objects().len().saturating_sub(1));
-                app.reset_selection();
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                app.selected = app.selected.saturating_sub(1);
-                app.reset_selection();
-            }
-            KeyCode::PageDown => app.scroll = app.scroll.saturating_add(8),
-            KeyCode::PageUp => app.scroll = app.scroll.saturating_sub(8),
-            KeyCode::Char('r') => {
-                app.dispatch(Job::Snapshot);
-            }
-            KeyCode::Enter | KeyCode::Char('g') => {
-                if let Some((k, v)) = app.target() {
-                    app.dispatch(Job::Get(k, v));
-                }
-            }
-            KeyCode::Char('a') => {
-                if let Err(error) = app.prepare_apply() {
-                    app.failed = true;
-                    app.status = error;
-                }
-            }
-            KeyCode::Char('p') => {
-                app.show_presets();
-                app.input = Some(format!("preset load {}", presets::SEASTONE2_ID));
-            }
-            KeyCode::Char(':') => {
-                app.input = Some(String::new());
-                app.scroll = 0;
-            }
-            KeyCode::Char('l') => {
-                app.reset_selection();
-            }
-            KeyCode::Char('w') => {
-                app.details = format!(
-                    "FULL INVENTORY WARNINGS\n{}",
-                    app.inventory
-                        .warnings
-                        .as_deref()
-                        .unwrap_or_default()
-                        .join("\n\n")
-                );
-                app.scroll = 0;
-            }
-            KeyCode::Char('e') => {
-                if let Some((k, v)) = app.target() {
-                    app.input = Some(format!("set {k} {v} "));
+                KeyCode::Char(':') => {
+                    app.input = Some(String::new());
                     app.scroll = 0;
                 }
-            }
-            KeyCode::Char('d') => {
-                if let Some((k, v)) = app.target() {
-                    app.prepare(format!("remove {k} {v}"));
+                KeyCode::Char('l') => {
+                    app.reset_selection();
                 }
-            }
-            KeyCode::Char('c') => {
-                let k = app.target().map(|t| t.0).unwrap_or_else(|| {
-                    match app.page {
-                        1 => "vlan",
-                        3 => "virtual_router",
-                        4 => "acl_table",
-                        _ => "vlan",
+                KeyCode::Char('w') => {
+                    app.details = format!(
+                        "FULL INVENTORY WARNINGS\n{}",
+                        app.inventory
+                            .warnings
+                            .as_deref()
+                            .unwrap_or_default()
+                            .join("\n\n")
+                    );
+                    app.scroll = 0;
+                }
+                KeyCode::Char('e') => {
+                    if let Some((k, v)) = app.target() {
+                        app.input = Some(format!("set {k} {v} "));
+                        app.scroll = 0;
                     }
-                    .into()
-                });
-                app.input = Some(format!("create {k} "));
-                app.scroll = 0;
+                }
+                KeyCode::Char('d') => {
+                    if let Some((k, v)) = app.target() {
+                        app.prepare(format!("remove {k} {v}"));
+                    }
+                }
+                KeyCode::Char('c') => {
+                    let k = app.target().map(|t| t.0).unwrap_or_else(|| {
+                        match app.page {
+                            1 => "vlan",
+                            3 => "virtual_router",
+                            4 => "acl_table",
+                            _ => "vlan",
+                        }
+                        .into()
+                    });
+                    app.input = Some(format!("create {k} "));
+                    app.scroll = 0;
+                }
+                KeyCode::Char('?') => {
+                    let k = app.target().map(|t| t.0);
+                    app.details = command::help(k.as_deref());
+                    app.scroll = 0;
+                }
+                _ => {}
             }
-            KeyCode::Char('?') => {
-                let k = app.target().map(|t| t.0);
-                app.details = command::help(k.as_deref());
-                app.scroll = 0;
-            }
-            _ => {}
         }
+    })();
+    // An outstanding apply is cancelled between steps, but its audit is the
+    // only record of what reached hardware: wait (bounded) for it and report
+    // it after the terminal is restored.
+    let report = app.applying.then(|| {
+        cancelled.store(true, Ordering::Release);
+        app.status =
+            "Cancelling preset apply: waiting for the in-flight step and its readback".into();
+        let _ = terminal.draw(|frame| draw(frame, &mut app, &endpoint.to_string()));
+        let deadline = Instant::now() + rpc_timeout * 8;
+        loop {
+            match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(Reply::Applied(_, report)) => break Some(report),
+                Ok(_) => continue,
+                Err(_) => break None,
+            }
+        }
+    });
+    // Otherwise no join: a bounded in-flight read may finish later; dropping
+    // the channels stops the worker without delaying terminal restoration.
+    let _ = terminal.show_cursor();
+    drop(guard);
+    match report {
+        Some(Some(report)) => eprintln!("sai-tui: {}\n{}", apply_summary(&report), apply_audit(&report)),
+        Some(None) => eprintln!("sai-tui: preset apply audit unavailable (worker did not finish in time); an in-flight mutation may have partial effects; inspect server state"),
+        None => {}
     }
-    // No join: a bounded in-flight read may finish later; dropping the channels
-    // stops the worker without delaying terminal restoration or quit.
-    terminal.show_cursor()?;
-    Ok(())
+    result
 }
 fn pretty_bps(rate: Option<f64>) -> String {
     rate.map(|r| format!("{r:.1} bit/s"))
@@ -976,6 +1021,7 @@ mod tests {
             counter_key: None,
             next_poll: Instant::now(),
             tx,
+            applying: false,
         };
         (app, rx)
     }
@@ -1039,11 +1085,29 @@ mod tests {
         assert!(rx.try_recv().is_err());
         app.prepare("preset apply".into());
         app.confirm_review().unwrap();
-        match rx.try_recv().unwrap() {
-            Job::Apply(staging, _, _) => assert_eq!(staging.plan(), original.as_ref()),
+        let staging = match rx.try_recv().unwrap() {
+            Job::Apply(staging, _, _) => staging,
             _ => panic!("separate apply job required"),
-        }
-        assert!(app.busy);
+        };
+        assert_eq!(staging.plan(), original.as_ref());
+        assert!(app.busy && app.applying);
+        assert!(rx.try_recv().is_err());
+        // A partially applied plan must be reloaded, never re-applied as-is.
+        app.reply(Reply::Applied(
+            staging,
+            ApplyReport {
+                status: ApplyStatus::Failed {
+                    step: 1,
+                    reason: "test".into(),
+                },
+                steps: vec![],
+                bindings: BTreeMap::new(),
+                inventory: None,
+                partial_effects: true,
+            },
+        ));
+        assert!(!app.busy && !app.applying && app.staged.is_none());
+        assert!(app.prepare_apply().is_err());
         assert!(rx.try_recv().is_err());
     }
     #[test]
