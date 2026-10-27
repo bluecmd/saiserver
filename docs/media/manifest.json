@@ -1,0 +1,61 @@
+{
+  "source": "sw4-terminal-capture.json",
+  "source_sha256": "b9ecf40dd47c22625ef8c89d886cb850f76687a5170471c3e86a19da395ac369",
+  "recorded_host": "ixp-lab-sw4",
+  "capture_date": "2026-10-27",
+  "method": "Timed replay of recorded terminal snapshots; held states, no inferred intermediate output; one-second final freeze.",
+  "clips": [
+    {
+      "name": "sai-tui-configuration",
+      "first_snapshot": 0,
+      "last_snapshot": 6,
+      "recorded_range_seconds": [
+        2.016,
+        12.024
+      ],
+      "mp4": {
+        "file": "sai-tui-configuration.mp4",
+        "sha256": "2b1040367b213319a6dbb08bac05f818be21021e58138accfe9083488cf62533",
+        "bytes": 436704,
+        "duration_seconds": 11.0,
+        "codec_name": "h264",
+        "width": 1372,
+        "height": 882,
+        "pix_fmt": "yuv420p"
+      },
+      "gif": {
+        "file": "sai-tui-configuration.gif",
+        "sha256": "c7aeea4ee11b057a8409e32e15d28fa55a8d0af46453c1aae158a6b0bf58ded5",
+        "bytes": 620192,
+        "duration_seconds": 10.98,
+        "recorded_states": 7
+      }
+    },
+    {
+      "name": "sai-tui-counters",
+      "first_snapshot": 7,
+      "last_snapshot": 11,
+      "recorded_range_seconds": [
+        15.033,
+        27.039
+      ],
+      "mp4": {
+        "file": "sai-tui-counters.mp4",
+        "sha256": "9c6738c2f7bf6237186f9dbdd5c847ea451d63317d247371381f88fa7bf4e49f",
+        "bytes": 138486,
+        "duration_seconds": 13.0,
+        "codec_name": "h264",
+        "width": 1372,
+        "height": 882,
+        "pix_fmt": "yuv420p"
+      },
+      "gif": {
+        "file": "sai-tui-counters.gif",
+        "sha256": "02850ee55817db0110b332e8068475084a821e2900c2e43e81923b14c7f06ba7",
+        "bytes": 410069,
+        "duration_seconds": 12.99,
+        "recorded_states": 5
+      }
+    }
+  ]
+}

@@ -7,6 +7,36 @@ ACLs and bindings, plus live unsigned port counters and traffic-rate graphs.
 Mutations require an explicit review/confirmation and real server readback;
 unsupported or unverified operations remain visible failures, never fake state.
 
+## TUI showcase
+
+Recorded on **ixp-lab-sw4**, talking to the real SAI Thrift service while
+**ixp-lab-eos1** supplied and verified traffic. See the
+[live verification record](docs/lab-verification.md) for results and SDK limits.
+
+![Actual TUI showing port counters and a nonzero traffic-rate graph](docs/evidence/sw4-tui-counters.png)
+
+### Screencasts
+
+| Review, cancel, confirm and read back configuration | Live counters and traffic-rate history |
+| --- | --- |
+| [![Configuration screencast preview](docs/media/sai-tui-configuration.gif)](docs/media/sai-tui-configuration.mp4) | [![Live telemetry screencast preview](docs/media/sai-tui-counters.gif)](docs/media/sai-tui-counters.mp4) |
+| [Watch/download MP4 · 11 seconds](docs/media/sai-tui-configuration.mp4) | [Watch/download MP4 · 13 seconds](docs/media/sai-tui-counters.mp4) |
+
+These are **timed replays of terminal snapshots from the actual live session**,
+not mock data or a new switch run. Recorded states are held between their
+capture timestamps, with a one-second final freeze; they are not continuous
+frame-by-frame recordings. GIF previews play inline on GitHub; click through
+for the full-resolution H.264 videos. [Source capture and regeneration](docs/media/README.md).
+
+<details>
+<summary>More screenshots: explicit mutation review and actual getter readback</summary>
+
+![Reviewing a router-interface change before confirmation](docs/evidence/sw4-tui-review.png)
+
+![Actual router-interface getter after a confirmed change](docs/evidence/sw4-tui-readback.png)
+
+</details>
+
 ## Run the TUI
 
 Requires Rust 1.89+ and an **already running compatible saiserver**:
@@ -39,7 +69,8 @@ without explicit authority and a restoration baseline. For an authorized
 unattended session, `--no-shell` disables the interactive SDK shell. Container
 runs of the tested SDK need `--shm-size=512m`; the default 64MiB is insufficient.
 The commands below are low-level SDK setup, not prerequisites for merely
-building the Rust client.
+building the Rust client. Deployments can override the unicast default switch
+MAC with `SAI_SRC_MAC=02:00:00:00:00:01`; the server prints the address selected.
 
 ```
 sudo apt install binutils g++ libthrift-dev make thrift-compiler libboost1.74-dev lz4
