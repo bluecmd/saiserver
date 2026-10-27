@@ -10,8 +10,10 @@ _LINUX_X86_64 = [
 ]
 
 exports_files([
+    "Cargo.Bazel.lock",
     "Cargo.lock",
     "Cargo.toml",
+    "src/sai_tui.rs",
 ])
 
 # Keep the existing client on its checked-in bindings. The separately generated
