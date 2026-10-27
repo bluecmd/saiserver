@@ -24,6 +24,7 @@ rust_library(
     ),
     crate_name = "sai_tui",
     crate_root = "src/lib.rs",
+    compile_data = ["//docs/evidence/seastone2:ixp-lab-sw2-sanitized.json"],
     edition = "2021",
     target_compatible_with = _LINUX_X86_64,
     version = "0.1.0",
@@ -100,10 +101,21 @@ rust_test(
     deps = [":sai_tui"],
 )
 
+rust_test(
+    name = "config_apply_test",
+    size = "small",
+    srcs = ["tests/config_apply.rs"],
+    crate_name = "config_apply_test",
+    edition = "2021",
+    target_compatible_with = _LINUX_X86_64,
+    deps = [":sai_tui"],
+)
+
 test_suite(
     name = "tests",
     tests = [
         ":cli_test",
+        ":config_apply_test",
         ":safety_test",
         ":unit_tests",
     ],

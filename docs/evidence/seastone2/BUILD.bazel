@@ -1,0 +1,2 @@
+# Sanitized, read-only platform evidence used by the preset lane-map regression.
+exports_files(["ixp-lab-sw2-sanitized.json"], visibility = ["//visibility:public"])
