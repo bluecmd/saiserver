@@ -160,6 +160,14 @@ pub fn build(bound: &BoundPreset, inventory: &Inventory) -> Result<Plan, String>
         }
     }
     let mut ops = Vec::new();
+    // Fail closed throughout nontransactional setup. Each administrative write
+    // is separately read back; no forwarding change happens before all are down.
+    for port in &bound.preset.ports {
+        ops.push(Op::Set {
+            target: Target::Object(reference("port", &bound.port_oids[&port.name])),
+            attrs: attributes(vec![("admin", literal(false))]),
+        });
+    }
     let vr = create(
         &mut ops,
         "virtual_router",
@@ -243,6 +251,15 @@ pub fn build(bound: &BoundPreset, inventory: &Inventory) -> Result<Plan, String>
             ("tos", literal(0)),
         ],
     );
+    // Verify deny coverage before any new membership/RIF/route is configured.
+    for port in &bound.preset.ports {
+        if port.ingress_acl {
+            ops.push(Op::Set {
+                target: Target::Object(reference("port", &bound.port_oids[&port.name])),
+                attrs: attributes(vec![("ingress_acl", V::Reference(group.clone()))]),
+            });
+        }
+    }
     ops.extend(removals);
     for port in &bound.preset.ports {
         let oid = &bound.port_oids[&port.name];
@@ -266,7 +283,14 @@ pub fn build(bound: &BoundPreset, inventory: &Inventory) -> Result<Plan, String>
                     vec![("vlan_id", literal(vlan))],
                 );
                 let bridge = match bridge_ports.get(oid) {
-                    Some(bp) => reference("bridge_port", bp),
+                    Some(bp) => {
+                        let bridge = reference("bridge_port", bp);
+                        ops.push(Op::Set {
+                            target: Target::Object(bridge.clone()),
+                            attrs: attributes(vec![("admin", literal(true))]),
+                        });
+                        bridge
+                    }
                     None => create(
                         &mut ops,
                         "bridge_port",
@@ -366,22 +390,28 @@ pub fn build(bound: &BoundPreset, inventory: &Inventory) -> Result<Plan, String>
             );
         }
     }
-    // Bind policy/mirroring only after dependencies exist. The transport remains
-    // unbound and is never a mirror source.
+    // Enable transport first, then verify each source mirror binding before a
+    // SEPARATE port enable. Multi-attribute set is not an atomic safety boundary.
+    ops.push(Op::Set {
+        target: Target::Object(reference("port", transport_oid)),
+        attrs: attributes(vec![("admin", literal(true))]),
+    });
     for port in &bound.preset.ports {
-        let mut attrs = vec![("admin", literal(true))];
-        if port.ingress_acl {
-            attrs.push(("ingress_acl", V::Reference(group.clone())));
+        if port.name == bound.preset.erspan.transport_port {
+            continue;
         }
         if port.mirror_egress {
-            attrs.push((
-                "egress_mirror_sessions",
-                V::References(vec![mirror.clone()]),
-            ));
+            ops.push(Op::Set {
+                target: Target::Object(reference("port", &bound.port_oids[&port.name])),
+                attrs: attributes(vec![(
+                    "egress_mirror_sessions",
+                    V::References(vec![mirror.clone()]),
+                )]),
+            });
         }
         ops.push(Op::Set {
             target: Target::Object(reference("port", &bound.port_oids[&port.name])),
-            attrs: attributes(attrs),
+            attrs: attributes(vec![("admin", literal(true))]),
         });
     }
     let plan = Plan {
@@ -420,6 +450,7 @@ pub(crate) fn fixture() -> Inventory {
                     ),
                     ("speed".into(), port.speed_mbps.to_string()),
                     ("pvid".into(), "1".into()),
+                    ("admin".into(), "true".into()),
                     ("ingress_acl".into(), "0x0".into()),
                     ("egress_acl".into(), "0x0".into()),
                     ("egress_mirror_sessions".into(), "".into()),
@@ -529,8 +560,47 @@ mod tests {
         assert_eq!(bindings.len(), 32);
         assert!(bindings
             .iter()
-            .all(|(key, attrs)| *key != &bound.port_oids["Ethernet128"]
-                && attrs.contains_key("ingress_acl")));
+            .all(|(key, attrs)| *key != &bound.port_oids["Ethernet128"] && attrs.len() == 1));
+        let mut down = std::collections::BTreeSet::new();
+        let mut protected = std::collections::BTreeSet::new();
+        let mut mirrored = std::collections::BTreeSet::new();
+        for cmd in &validation.preview {
+            match cmd {
+                command::Command::Set { kind, key, attrs } if kind == "port" => {
+                    assert_eq!(
+                        attrs.len(),
+                        1,
+                        "security transitions must be separate verified operations"
+                    );
+                    if attrs.get("admin").is_some_and(|a| a == "false") {
+                        down.insert(key.clone());
+                    }
+                    if attrs.contains_key("ingress_acl") {
+                        assert!(down.contains(key));
+                        protected.insert(key.clone());
+                    }
+                    if attrs.contains_key("egress_mirror_sessions") {
+                        assert!(down.contains(key));
+                        mirrored.insert(key.clone());
+                    }
+                    if attrs.get("admin").is_some_and(|a| a == "true") {
+                        if key != &bound.port_oids["Ethernet128"] {
+                            assert!(protected.contains(key) && mirrored.contains(key));
+                        }
+                        assert!(down.remove(key));
+                    }
+                }
+                command::Command::Create { kind, .. }
+                    if kind == "vlan_member" || kind == "router_interface" =>
+                {
+                    assert_eq!(protected.len(), 32);
+                    assert_eq!(down.len(), 33);
+                }
+                _ => (),
+            }
+        }
+        assert_eq!(protected.len(), 32);
+        assert!(down.is_empty());
         assert!(plan.operations.len() < config::MAX_OPERATIONS);
     }
 
@@ -564,6 +634,8 @@ mod tests {
         inventory: Inventory,
         next: u64,
         mutations: usize,
+        fail_policy: bool,
+        cancel_on_policy: Option<std::sync::Arc<AtomicBool>>,
     }
     impl Service for Mock {
         fn snapshot(&mut self) -> Result<Inventory, Failure> {
@@ -613,6 +685,18 @@ mod tests {
             attrs: &BTreeMap<String, String>,
         ) -> Result<Object, Failure> {
             self.mutations += 1;
+            if attrs.contains_key("ingress_acl") {
+                if self.fail_policy {
+                    return Err(Failure {
+                        category: "server".into(),
+                        status: Some(-2),
+                        message: "injected policy failure".into(),
+                    });
+                }
+                if let Some(cancelled) = &self.cancel_on_policy {
+                    cancelled.store(true, std::sync::atomic::Ordering::Release);
+                }
+            }
             let o = self
                 .inventory
                 .objects
@@ -638,12 +722,69 @@ mod tests {
         }
     }
     #[test]
+    fn failure_or_cancellation_during_policy_setup_leaves_all_ports_down() {
+        for fail in [true, false] {
+            let cancelled = std::sync::Arc::new(AtomicBool::new(false));
+            let mut mock = Mock {
+                inventory: fixture(),
+                next: 0x10000,
+                mutations: 0,
+                fail_policy: fail,
+                cancel_on_policy: if fail { None } else { Some(cancelled.clone()) },
+            };
+            let bound = presets::bind(
+                presets::get(presets::SEASTONE2_ID).unwrap(),
+                &mock.inventory,
+            )
+            .unwrap();
+            let mut staging = Staging::default();
+            staging
+                .load(
+                    build(&bound, &mock.inventory).unwrap(),
+                    &mock.inventory,
+                    true,
+                )
+                .unwrap();
+            let approval = staging.approve(true).unwrap();
+            let report = apply::apply(&mut staging, Some(approval), &mut mock, &cancelled);
+            assert_ne!(report.status, apply::ApplyStatus::Completed);
+            assert!(report.partial_effects);
+            for port in mock
+                .inventory
+                .objects
+                .as_ref()
+                .unwrap()
+                .iter()
+                .filter(|o| o.kind.as_deref() == Some("port"))
+            {
+                assert_eq!(port.attributes.as_ref().unwrap()["admin"], "false");
+            }
+            assert!(!mock
+                .inventory
+                .objects
+                .as_ref()
+                .unwrap()
+                .iter()
+                .any(|o| o.kind.as_deref() == Some("router_interface")));
+        }
+    }
+    #[test]
     fn complete_preset_applies_once_to_mock_with_real_symbol_resolution() {
         let mut mock = Mock {
             inventory: fixture(),
             next: 0x10000,
             mutations: 0,
+            fail_policy: false,
+            cancel_on_policy: None,
         };
+        mock.inventory.objects.as_mut().unwrap().push(Object::new(
+            "bridge_port".to_owned(),
+            "0x2000".to_owned(),
+            BTreeMap::from([
+                ("port".into(), "0x1".into()),
+                ("admin".into(), "false".into()),
+            ]),
+        ));
         let bound = presets::bind(
             presets::get(presets::SEASTONE2_ID).unwrap(),
             &mock.inventory,
@@ -669,6 +810,13 @@ mod tests {
         );
         assert_eq!(report.completed_steps(), expected);
         assert_eq!(mock.mutations, expected);
+        assert_eq!(
+            mock.get("bridge_port", "0x2000")
+                .unwrap()
+                .attributes
+                .unwrap()["admin"],
+            "true"
+        );
         assert!(report.steps.iter().all(|s| s.outcome.inventory.is_none()));
         let transport = mock.get("port", &bound.port_oids["Ethernet128"]).unwrap();
         assert_eq!(

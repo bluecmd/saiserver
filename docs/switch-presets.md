@@ -23,6 +23,13 @@ interactive commands, not additions to the single-operation headless CLI.
 Review text is scrollable with PageUp/PageDown. Load and apply confirmations
 have distinct labels; the load confirmation never implies apply approval.
 
+**Applying is disruptive: all 33 physical ports are disabled first.** Ingress
+ACLs are separately attached and verified before forwarding setup. Reused access
+bridge ports are explicitly enabled while the physical ports remain down. Each
+mirror binding is verified before a separate physical-port enable; the transport
+is enabled before mirror sources. Failure or cancellation can leave ports **down**;
+there is no automatic restoration to an unfiltered state.
+
 **Apply is not a transaction.** The client resolves symbolic references only
 from successful creates with independent matching getters. Each operation
 retains its ordinary preflight, mutation, getter, and post-snapshot checks.

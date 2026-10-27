@@ -251,7 +251,7 @@ impl App {
         if self.staging.plan() != Some(&plan) {
             return Err("configuration changed; reload and review again".into());
         }
-        self.details = format!("REVIEW HARDWARE APPLICATION — {} operations\n{}\n\nDefault VLAN memberships listed below will be removed. This is NOT a transaction: no rollback or automatic retry.\nStops at first failure or uncertain readback; quitting stops remaining steps, not an already-sent mutation.\nIPv6 is static/no-DAD; verify address uniqueness. No dynamic neighbor learning or ICMP echo service.\nInventory is limited; undiscovered dependencies may cause partial failure.\n\n{:#?}\n\ny APPLIES ONCE; n/Esc cancels without changing hardware or staged state.", plan.operations.len(), plan.title, plan.operations);
+        self.details = format!("REVIEW HARDWARE APPLICATION — {} operations\n{}\n\nDISRUPTIVE: all 33 physical ports are disabled first. ACLs are verified before forwarding setup; mirrors are verified before separate port enables. Failure/cancellation may leave ports DOWN. Default VLAN memberships listed below will be removed. This is NOT a transaction: no rollback or automatic retry.\nStops at first failure or uncertain readback; quitting stops remaining steps, not an already-sent mutation.\nIPv6 is static/no-DAD; verify address uniqueness. No dynamic neighbor learning or ICMP echo service.\nInventory is limited; undiscovered dependencies may cause partial failure.\n\n{:#?}\n\ny APPLIES ONCE; n/Esc cancels without changing hardware or staged state.", plan.operations.len(), plan.title, plan.operations);
         self.review = Some(Review {
             text: "preset apply".into(),
             action: ReviewAction::ApplyPreset,
