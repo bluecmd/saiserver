@@ -4,7 +4,14 @@ load("//bazel:thrift.bzl", "thrift_codegen")
 
 package(default_visibility = ["//visibility:public"])
 
-exports_files(["sai_tui.thrift", "switch_sai.thrift"])
+# The startup regression links the real main against its own fake SDK and RPC
+# listener, so the server source is exported rather than wrapped in a library.
+exports_files([
+    "sai_tui.thrift",
+    "saiserver.cpp",
+    "switch_sai.thrift",
+    "switch_sai_rpc_server.h",
+])
 
 filegroup(
     name = "thrift_idl",
@@ -55,13 +62,30 @@ cc_library(
 )
 
 cc_library(
+    name = "interface_address",
+    srcs = ["interface_address.cpp"],
+    hdrs = ["interface_address.h"],
+    strip_include_prefix = ".",
+    deps = ["@saiserver_sai//:headers"],
+    copts = ["-std=c++17"],
+    linkopts = ["-pthread"],
+)
+
+cc_library(
     name = "tui_rpc",
     srcs = ["tui_rpc.cpp"],
     hdrs = ["tui_rpc.h"],
     strip_include_prefix = ".",
-    deps = [":thrift_cpp", "@saiserver_sai//:headers"],
+    deps = [":interface_address", ":thrift_cpp", "@saiserver_sai//:headers"],
     copts = ["-std=c++17"],
     linkopts = ["-pthread"],
+)
+
+cc_library(
+    name = "bounded_rpc_processor",
+    hdrs = ["bounded_rpc_processor.h"],
+    strip_include_prefix = ".",
+    deps = [":thrift_cpp", ":tui_rpc"],
 )
 
 cc_library(
@@ -69,7 +93,7 @@ cc_library(
     srcs = ["switch_sai_rpc_server.cpp"],
     hdrs = ["switch_sai_rpc_server.h"],
     strip_include_prefix = ".",
-    deps = [":tui_rpc"],
+    deps = [":bounded_rpc_processor", ":tui_rpc"],
     # The legacy handler predates override annotations; retain other warnings.
     copts = ["-std=c++17", "-Wno-inconsistent-missing-override"],
 )
@@ -98,7 +122,7 @@ cc_library(
     name = "fdb_test_support",
     testonly = True,
     srcs = ["saiserver.cpp", "switch_sai_rpc_server.h"],
-    deps = [":thrift_cpp", "@saiserver_sai//:headers"],
+    deps = [":thrift_cpp", ":tui_rpc", "@saiserver_sai//:headers"],
     copts = ["-std=c++17", "-ffunction-sections", "-fdata-sections"],
     local_defines = ["main=saiserver_unused_main"],
     linkopts = ["-Wl,--gc-sections", "-pthread"],

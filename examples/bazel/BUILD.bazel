@@ -8,6 +8,7 @@ cc_test(
     srcs = ["consumer.cpp"],
     deps = [
         "@saiserver//:sai_headers",
+        "@saiserver//:sai_loader",
         "@saiserver//:server_lib",
         "@saiserver//:thrift_cpp",
         ":consumer_cpp",

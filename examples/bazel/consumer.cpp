@@ -11,12 +11,8 @@ extern "C" {
 sai_object_id_t gSwitchId = SAI_NULL_OBJECT_ID;
 std::mutex gFdbMutex;
 
-// Test-only C API provider: the embedding application normally links a pinned
-// SDK cc_import, or //src:sai_dynamic. No ASIC APIs are invoked by this test.
-extern "C" sai_status_t sai_api_query(sai_api_t, void** output) {
-    if (output) *output = nullptr;
-    return SAI_STATUS_NOT_SUPPORTED;
-}
+// The SAI C API comes from @saiserver//:sai_loader, as in a real deployment.
+// It loads nothing until SAI_LIBRARY_PATH is used; no ASIC APIs are invoked.
 
 int main() {
     // A volatile reference forces real library linkage, not a header-only check.

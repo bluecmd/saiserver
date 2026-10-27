@@ -93,7 +93,7 @@ All these labels also work as `@saiserver//:...` from another module.
 | `//:thrift_rust_runtime` | Matching Rust `thrift` runtime, preserving trait/crate identity |
 | `//:thrift_compiler` | Source-built Thrift compiler |
 | `//:thrift_runtime` | Binary/buffered socket C++ Thrift runtime |
-| `//:tests` | All eight project Bazel test targets |
+| `//:tests` | All twelve project Bazel test targets |
 
 Individual IDLs are exported as `@saiserver//src:sai_tui.thrift` and
 `@saiserver//src:switch_sai.thrift`. The latter inherits the bounded service.

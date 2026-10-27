@@ -1,4 +1,5 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
@@ -9,6 +10,48 @@ cc_test(
     srcs = ["server/tui_rpc_test.cpp"],
     deps = ["//src:tui_rpc"],
     copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-UNDEBUG"],
+)
+
+# The fake-SDK fixture is #included by its sibling tests, not compiled alone.
+cc_library(
+    name = "interface_address_fixture",
+    testonly = True,
+    textual_hdrs = ["server/interface_address_test.cpp"],
+    deps = ["//src:interface_address"],
+)
+
+cc_test(
+    name = "interface_address_test",
+    srcs = ["server/interface_address_test.cpp"],
+    deps = ["//src:interface_address"],
+    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-UNDEBUG"],
+)
+
+cc_test(
+    name = "interface_address_rpc_test",
+    srcs = ["server/interface_address_rpc_test.cpp"],
+    deps = [":interface_address_fixture", "//src:bounded_rpc_processor"],
+    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-UNDEBUG"],
+)
+
+# Real server main linked against the fixture's fake SDK and RPC listener.
+cc_binary(
+    name = "startup_test_bin",
+    testonly = True,
+    srcs = [
+        "server/startup_test.cpp",
+        "//src:saiserver.cpp",
+        "//src:switch_sai_rpc_server.h",
+    ],
+    deps = [":interface_address_fixture", "//src:tui_rpc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter", "-UNDEBUG"],
+)
+
+sh_test(
+    name = "startup_test",
+    srcs = ["server/startup_cases.sh"],
+    data = [":startup_test_bin"],
+    args = ["$(rootpath :startup_test_bin)"],
 )
 
 cc_test(
@@ -37,12 +80,31 @@ cc_binary(
     copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
 )
 
+cc_binary(
+    name = "optional_fake_sai.so",
+    testonly = True,
+    srcs = ["server/fake_optional_sai.cpp"],
+    deps = [":fake_sai_source", "//:sai_headers"],
+    linkshared = True,
+    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
+)
+
+cc_library(
+    name = "fake_sai_source",
+    testonly = True,
+    textual_hdrs = ["fake_sai.cpp"],
+)
+
 cc_test(
     name = "sai_dynamic_test",
     srcs = ["test_sai_dynamic.cpp"],
     deps = ["//src:sai_dynamic"],
-    data = [":fake_sai.so", ":incomplete_fake_sai.so"],
-    args = ["$(rootpath :fake_sai.so)", "$(rootpath :incomplete_fake_sai.so)"],
+    data = [":fake_sai.so", ":incomplete_fake_sai.so", ":optional_fake_sai.so"],
+    args = [
+        "$(rootpath :fake_sai.so)",
+        "$(rootpath :incomplete_fake_sai.so)",
+        "$(rootpath :optional_fake_sai.so)",
+    ],
     copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
 )
 
@@ -64,6 +126,9 @@ test_suite(
     name = "tests",
     tests = [
         ":server_test",
+        ":interface_address_test",
+        ":interface_address_rpc_test",
+        ":startup_test",
         ":fdb_events_test",
         ":sai_dynamic_test",
         ":generated_bindings_test",

@@ -26,23 +26,4 @@ done
   -I"$build/gen-cpp" -Isrc ${EXTRA_CPPFLAGS:-} \
   tests/server/startup_test.cpp src/saiserver.cpp src/tui_rpc.cpp src/interface_address.cpp \
   "$build/gen-cpp/sai_tui_types.cpp" ${EXTRA_LDFLAGS:-} -lthrift -pthread -o "$build/startup_test"
-opts=(--interface-address --interface-address-static-ipv6-no-dad --interface-address-allow-unpoliced-cpu)
-FAKE_STARTUP_MODE=disabled timeout 10 "$build/startup_test" --no-shell
-FAKE_STARTUP_MODE=enabled timeout 10 "$build/startup_test" "${opts[@]}"
-FAKE_STARTUP_MODE=unregister-unsupported timeout 10 "$build/startup_test" "${opts[@]}"
-FAKE_STARTUP_MODE=enabled timeout 10 "$build/startup_test" --interface-address --interface-address-static-ipv6-no-dad --interface-address-policer 8000
-expect_failure() {
-  local rc=0
-  "$@" || rc=$?
-  if [[ $rc != 1 ]]; then echo "Expected exit 1, got $rc: $*" >&2; exit 1; fi
-}
-for mode in bad-callback cleanup-fail rollback-fail remove-fail uninit-fail; do
-  expect_failure env FAKE_STARTUP_MODE="$mode" timeout 10 "$build/startup_test" "${opts[@]}"
-done
-expect_failure "$build/startup_test" --interface-address
-expect_failure "$build/startup_test" --interface-address --interface-address-static-ipv6-no-dad
-expect_failure "$build/startup_test" --interface-address --interface-address-allow-unpoliced-cpu
-expect_failure "$build/startup_test" --interface-address-policer 8000
-expect_failure "$build/startup_test" --interface-address --interface-address-static-ipv6-no-dad --interface-address-policer -1
-expect_failure "$build/startup_test" --interface-address --interface-address-static-ipv6-no-dad --interface-address-policer 18446744073709551616
-echo 'PASS real CLI/startup/callback verification and ordered shutdown (fake SDK/listener)'
+tests/server/startup_cases.sh "$build/startup_test"
