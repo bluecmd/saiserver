@@ -291,6 +291,57 @@ mod tests {
     }
 
     #[test]
+    fn generated_map_matches_collected_stock_hwsku_and_rejects_active_breakout() {
+        let evidence: serde_json::Value = serde_json::from_str(include_str!(
+            "../../docs/evidence/seastone2/ixp-lab-sw2-sanitized.json"
+        ))
+        .unwrap();
+        let source = &evidence["files"]
+            ["/usr/share/sonic/device/x86_64-cel_seastone_2-r0/Seastone_2/port_config.ini"];
+        assert_eq!(source["source_sha256"], MAPPING_SHA256);
+        let lines: Vec<_> = source["evidence"]
+            .as_str()
+            .unwrap()
+            .lines()
+            .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
+            .collect();
+        let p = get(SEASTONE2_ID).unwrap();
+        assert_eq!(lines.len(), p.ports.len());
+        for (line, port) in lines.iter().zip(&p.ports) {
+            let fields: Vec<_> = line.split_whitespace().collect();
+            assert_eq!(fields[0], port.name);
+            assert_eq!(
+                lanes(fields[1]).unwrap(),
+                port.lanes.iter().copied().collect()
+            );
+            assert_eq!(fields[2], port.alias);
+            assert_eq!(fields[4].parse::<u32>().unwrap(), port.speed_mbps);
+        }
+        let active = evidence["files"]["/etc/sonic/config_db.json"]["evidence"]["PORT"]
+            .as_object()
+            .unwrap();
+        let inventory = Inventory::new(
+            active
+                .values()
+                .enumerate()
+                .map(|(i, port)| {
+                    Object::new(
+                        "port".to_owned(),
+                        format!("0x{:x}", i + 1),
+                        BTreeMap::from([
+                            ("lanes".into(), port["lanes"].as_str().unwrap().into()),
+                            ("speed".into(), port["speed"].as_str().unwrap().into()),
+                        ]),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            Vec::<String>::new(),
+        );
+        assert_eq!(active.len(), 36);
+        assert!(bind(p, &inventory).unwrap_err().contains("Breakout"));
+    }
+
+    #[test]
     fn binding_uses_observed_lanes_not_inventory_order_or_guessed_oid() {
         let p = get(SEASTONE2_ID).unwrap();
         let bound = bind(p.clone(), &inventory(&p)).unwrap();
