@@ -16,6 +16,7 @@
 
 #include <cstring>
 #include <thread>
+#include <mutex>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -51,6 +52,7 @@ sai_switch_api_t* sai_switch_api;
 std::map<std::string, std::string> gProfileMap;
 
 extern std::vector<std::pair<sai_fdb_entry_t, sai_object_id_t>> gFdbMap;
+std::mutex gFdbMutex;
 
 sai_object_id_t gSwitchId; ///< SAI switch global object ID.
 
@@ -60,79 +62,44 @@ void on_switch_state_change(_In_ sai_object_id_t switch_id,
 
 void on_fdb_event(_In_ uint32_t count,
     _In_ sai_fdb_event_notification_data_t *data) {
-  sai_fdb_event_t event_type;
-  sai_fdb_entry_t fdb_entry;
-  uint32_t attr_count;
-  sai_attribute_t *attr;
-  sai_object_id_t bv_id;
-  sai_object_id_t bport_id;
-
-  attr = data->attr;
-  event_type = data->event_type;
-  fdb_entry = data->fdb_entry;
-  bv_id = fdb_entry.bv_id;
-  attr_count = data ->attr_count;
-
-  for (uint32_t i = 0; i < attr_count; i++) {
-    if (attr[i].id == SAI_FDB_ENTRY_ATTR_BRIDGE_PORT_ID) {
-      bport_id = attr[i].value.oid;
+  if (data == nullptr) return;
+  std::lock_guard<std::mutex> lock(gFdbMutex);
+  // SAI may batch notifications. Each record has its own attribute list;
+  // flush notifications may omit a bridge-port selector (meaning all ports).
+  for (uint32_t index = 0; index < count; ++index) {
+    const auto &notification = data[index];
+    const auto &entry = notification.fdb_entry;
+    sai_object_id_t bridge_port = SAI_NULL_OBJECT_ID;
+    for (uint32_t i = 0; i < notification.attr_count; ++i) {
+      if (notification.attr[i].id == SAI_FDB_ENTRY_ATTR_BRIDGE_PORT_ID)
+        bridge_port = notification.attr[i].value.oid;
     }
-  }
-
-  sai_fdb_entry_t fdb_m;
-  sai_object_id_t b_id;
-
-  switch (event_type) {
-  case SAI_FDB_EVENT_LEARNED:
-    gFdbMap.emplace_back(std::pair<sai_fdb_entry_t, sai_object_id_t>(fdb_entry,bport_id));
-    break;
-  case SAI_FDB_EVENT_FLUSHED:
-    if (bv_id == 0 && bport_id == 0) {
-      gFdbMap.clear();
-    } else {
-      for (auto it = gFdbMap.begin(); it != gFdbMap.end(); ) {
-        fdb_m = it->first;
-        b_id = it->second;
-
-        if (bport_id == 0 && bv_id == fdb_m.bv_id) {
-          it = gFdbMap.erase(it);
-        } else if (bv_id == 0 && bport_id == b_id) {
-          it = gFdbMap.erase(it);
-        } else if (bv_id == fdb_m.bv_id && bport_id == b_id) {
-          it = gFdbMap.erase(it);
-        } else {
-          it++;
-        }
-      }
+    const auto same_key = [&entry](const std::pair<sai_fdb_entry_t, sai_object_id_t> &item) {
+      return item.first.switch_id == entry.switch_id &&
+             item.first.bv_id == entry.bv_id &&
+             std::memcmp(item.first.mac_address, entry.mac_address, 6) == 0;
+    };
+    switch (notification.event_type) {
+    case SAI_FDB_EVENT_LEARNED:
+    case SAI_FDB_EVENT_MOVE: {
+      auto it = std::find_if(gFdbMap.begin(), gFdbMap.end(), same_key);
+      if (it == gFdbMap.end()) gFdbMap.emplace_back(entry, bridge_port);
+      else it->second = bridge_port;
+      break;
     }
-    break;
-  case SAI_FDB_EVENT_MOVE:
-    for (auto it = gFdbMap.begin(); it != gFdbMap.end(); it++) {
-      fdb_m = it->first;
-      b_id = it->second;
-      int n = memcmp ( fdb_entry.mac_address, fdb_m.mac_address, 6);
-
-      if (n == 0 && bv_id == fdb_m.bv_id) {
-        it->second = bport_id;
-      }
+    case SAI_FDB_EVENT_AGED:
+      gFdbMap.erase(std::remove_if(gFdbMap.begin(), gFdbMap.end(), same_key), gFdbMap.end());
+      break;
+    case SAI_FDB_EVENT_FLUSHED:
+      gFdbMap.erase(std::remove_if(gFdbMap.begin(), gFdbMap.end(),
+          [&entry, bridge_port](const std::pair<sai_fdb_entry_t, sai_object_id_t> &item) {
+            return (entry.bv_id == SAI_NULL_OBJECT_ID || item.first.bv_id == entry.bv_id) &&
+                   (bridge_port == SAI_NULL_OBJECT_ID || item.second == bridge_port);
+          }), gFdbMap.end());
+      break;
+    default:
+      break;
     }
-    break;
-  case SAI_FDB_EVENT_AGED:
-    for (auto it = gFdbMap.begin(); it != gFdbMap.end(); ) {
-      fdb_m = it->first;
-      b_id = it->second;
-      int n = memcmp ( fdb_entry.mac_address, fdb_m.mac_address, 6);
-
-      if (n == 0 && bv_id == fdb_m.bv_id) {
-        it = gFdbMap.erase(it);
-      } else {
-        it++;
-      }
-    }
-    break;
-  default:
-    printf("unknown event");
-    break;
   }
 }
 
