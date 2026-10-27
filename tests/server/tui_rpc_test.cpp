@@ -408,8 +408,12 @@ void preset_mirrors() {
         failwrite = 0;
     }
     failget = SAI_PORT_ATTR_EGRESS_MIRROR_SESSION;
+    tui_rpc::get(o, 1, "port", "5");
+    assert(o.attributes.count("lanes") && !o.attributes.count("egress_mirror_sessions"));
+    assert(o.attributes.at("unavailable.egress_mirror_sessions").find("status") != std::string::npos);
     error([&] { tui_rpc::set(o, 1, "port", "5", {{"egress_mirror_sessions", ""}}); }, SAI_STATUS_NOT_SUPPORTED, "READBACK FAILED");
-    error([&] { tui_rpc::get(o, 1, "port", "5"); }, SAI_STATUS_NOT_SUPPORTED);
+    tui_rpc::get(o, 1, "port", "5");
+    assert(o.attributes.count("unavailable.egress_mirror_sessions"));
     failget = UINT32_MAX;
     tui_rpc::set(o, 1, "port", "5", {{"egress_mirror_sessions", ""}}); assert(o.attributes.at("egress_mirror_sessions").empty());
     remove_status = SAI_STATUS_OBJECT_IN_USE;

@@ -400,7 +400,17 @@ sai_tui::Object observe(uint64_t sw, const std::string& kind, const Key& k) {
         out.attributes["bridge"] = hex(read("switch", key(sw, "switch", hex(sw)), SAI_SWITCH_ATTR_DEFAULT_1Q_BRIDGE_ID).value.oid);
     if (kind == "bridge_port" && type == SAI_BRIDGE_PORT_TYPE_1D_ROUTER) out.attributes["router_interface"] = hex(read(kind, k, SAI_BRIDGE_PORT_ATTR_RIF_ID).value.oid);
     if (kind == "port") {
-        out.attributes["egress_mirror_sessions"] = oidlist(list(kind, k, SAI_PORT_ATTR_EGRESS_MIRROR_SESSION));
+        try {
+            out.attributes["egress_mirror_sessions"] = oidlist(list(kind, k, SAI_PORT_ATTR_EGRESS_MIRROR_SESSION));
+        } catch (const sai_tui::RpcError& e) {
+            const bool unsupported = e.status == SAI_STATUS_NOT_SUPPORTED ||
+                e.status == SAI_STATUS_NOT_IMPLEMENTED || SAI_STATUS_IS_ATTR_NOT_IMPLEMENTED(e.status) ||
+                SAI_STATUS_IS_ATTR_NOT_SUPPORTED(e.status);
+            if (!unsupported) throw;
+            // Optional new feature must not hide all ports on an older SDK.
+            // Missing binding is NOT an empty list or a successful verification.
+            out.attributes["unavailable.egress_mirror_sessions"] = "SAI getter unsupported, status " + std::to_string(e.status);
+        }
         std::vector<uint32_t> lanes;
         bool done = false;
         for (unsigned tries = 0; tries < 4; ++tries) {
@@ -635,6 +645,12 @@ void set(sai_tui::Object& out, uint64_t sw, const std::string& kind, const std::
         }
         ++applied;
     }
+    if (kind == "port" && input.count("egress_mirror_sessions")) {
+        try { list(kind, k, SAI_PORT_ATTR_EGRESS_MIRROR_SESSION); }
+        catch (const sai_tui::RpcError& e) {
+            fail(e.status, "set succeeded; READBACK FAILED for egress_mirror_sessions: " + e.message);
+        }
+    }
     out = readback(sw, kind, k, "set (" + std::to_string(applied) + " attributes)");
 }
 void remove(uint64_t sw, const std::string& kind, const std::string& text) {
@@ -668,7 +684,7 @@ void snapshot(sai_tui::Inventory& out, uint64_t sw) {
         try {
             auto k = key(sw, kind, text); out.objects.push_back(observe(sw, kind, k));
             auto attrs = out.objects.back().attributes;
-            if (kind == "port") for (auto id : parse_oidlist(attrs.at("egress_mirror_sessions"))) add("mirror_session", hex(id));
+            if (kind == "port" && attrs.count("egress_mirror_sessions")) for (auto id : parse_oidlist(attrs.at("egress_mirror_sessions"))) add("mirror_session", hex(id));
             if (kind == "vlan") for (auto id : list(kind, k, SAI_VLAN_ATTR_MEMBER_LIST)) add("vlan_member", hex(id));
             if (kind == "bridge") for (auto id : list(kind, k, SAI_BRIDGE_ATTR_PORT_LIST)) add("bridge_port", hex(id));
             if (kind == "vlan_member") add("bridge_port", attrs.at("bridge_port"));

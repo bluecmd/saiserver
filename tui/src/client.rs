@@ -230,7 +230,14 @@ pub fn validate_references(cmd: &Command, inventory: &Inventory) -> Result<Vec<S
             let Some(v) = attrs.get(field.name) else {
                 continue;
             };
-            if let FieldValue::Oid(kinds, _) = field.value {
+            let (kinds, references) = match field.value {
+                FieldValue::Oid(kinds, _) => (kinds, vec![v.as_str()]),
+                FieldValue::OidList(kinds) => {
+                    (kinds, v.split(',').filter(|s| !s.is_empty()).collect())
+                }
+                _ => continue,
+            };
+            for v in references {
                 if v == "0x0" {
                     continue;
                 }
@@ -277,10 +284,9 @@ pub fn validate_references(cmd: &Command, inventory: &Inventory) -> Result<Vec<S
                 .and_then(|a| a.get("family"));
             if let Some(family) = family {
                 for name in ["src", "dst"] {
-                    if attrs
-                        .get(name)
-                        .is_some_and(|cidr| cidr.contains(':') != (family == "ipv6"))
-                    {
+                    if attrs.get(name).is_some_and(|cidr| {
+                        family == "mac" || cidr.contains(':') != (family == "ipv6")
+                    }) {
                         return Err(format!("acl_entry.{name} must match table {family}"));
                     }
                 }
@@ -371,6 +377,7 @@ fn mutate(service: &mut impl Service, cmd: &Command) -> Outcome {
     if let Command::Create { kind, attrs } = cmd {
         let identity = match kind.as_str() {
             "neighbor" => attrs.get("router_interface").zip(attrs.get("ip")),
+            "interface_address" => attrs.get("router_interface").zip(attrs.get("address")),
             "route" => attrs.get("virtual_router").zip(attrs.get("prefix")),
             _ => None,
         };
@@ -399,7 +406,7 @@ fn mutate(service: &mut impl Service, cmd: &Command) -> Outcome {
     // INVALID_OBJECT_ID (-19), rather than ITEM_NOT_FOUND (-7). An invalid
     // parent OID on a composite key is NOT proof that an entry was removed.
     let acknowledged_oid_removal = mutation.is_ok()
-        && matches!(cmd, Command::Remove { kind, .. } if !matches!(kind.as_str(), "neighbor" | "route" | "fdb"));
+        && matches!(cmd, Command::Remove { kind, .. } if !matches!(kind.as_str(), "neighbor" | "route" | "fdb" | "interface_address"));
     let verified = match &readback {
         Some(Ok(_)) => !removal,
         Some(Err(e)) => {

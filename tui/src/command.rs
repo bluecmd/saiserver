@@ -56,9 +56,12 @@ pub enum Value {
     Bool,
     Number(u64, u64),
     Oid(&'static [&'static str], bool),
+    OidList(&'static [&'static str]),
     Enum(&'static [&'static str]),
     Ip,
+    Ipv4,
     Cidr,
+    HostCidr,
     Mac,
 }
 #[derive(Clone, Copy)]
@@ -83,11 +86,13 @@ macro_rules! f {
 use Value::*;
 pub const KINDS: &[&str] = &[
     "port",
+    "mirror_session",
     "vlan",
     "bridge_port",
     "vlan_member",
     "virtual_router",
     "router_interface",
+    "interface_address",
     "next_hop",
     "neighbor",
     "route",
@@ -101,6 +106,9 @@ pub const KINDS: &[&str] = &[
 pub fn fields(kind: &str) -> &'static [Field] {
     match kind {
         "port" => &[
+            f!("speed", Number(1, u32::MAX as u64), false, true, "Mbps; actual supported speeds are platform-dependent"),
+            f!("egress_mirror_sessions", OidList(&["mirror_session"]), false, true,
+                "comma-separated session OIDs; empty value detaches all; replaces the entire egress mirror list"),
             f!(
                 "admin",
                 Bool,
@@ -129,6 +137,15 @@ pub fn fields(kind: &str) -> &'static [Field] {
                 true,
                 "table/group OID; 0x0 detaches"
             ),
+        ],
+        "mirror_session" => &[
+            f!("monitor_port", Oid(&["port"], false), true, true, "physical ERSPAN transport port OID"),
+            f!("src_ip", Ipv4, true, true, "IPv4 outer source address"),
+            f!("dst_ip", Ipv4, true, true, "IPv4 collector address"),
+            f!("src_mac", Mac, true, true, "observed source router MAC"),
+            f!("dst_mac", Mac, true, true, "explicit collector/next-hop Ethernet destination MAC"),
+            f!("ttl", Number(0, 255), true, true, "outer IPv4 TTL"),
+            f!("tos", Number(0, 255), true, true, "outer IPv4 TOS byte"),
         ],
         "vlan" => &[f!(
             "vlan_id",
@@ -227,6 +244,14 @@ pub fn fields(kind: &str) -> &'static [Field] {
             f!("ipv4", Bool, false, true, "true/false IPv4 forwarding"),
             f!("ipv6", Bool, false, true, "true/false IPv6 forwarding"),
         ],
+        "interface_address" => &[
+            f!("router_interface", Oid(&["router_interface"], false), true, false,
+                "RIF OID; server-owned ARP/NDP address service; key is RIF@HOST/PREFIX"),
+            f!("ingress_port", Oid(&["port"], false), true, false,
+                "one verified access/routed port; ambiguous VLAN attachments are rejected"),
+            f!("address", HostCidr, true, false,
+                "local unicast IPv4/IPv6 address/prefix; HOST BITS ARE PRESERVED; opt-in responder required"),
+        ],
         "next_hop" => &[
             f!(
                 "router_interface",
@@ -291,6 +316,8 @@ pub fn fields(kind: &str) -> &'static [Field] {
             ),
         ],
         "acl_table" => &[
+            f!("src_mac_enabled", Bool, false, false, "enable exact source-MAC matching; defaults true for mac tables, false otherwise"),
+            f!("l4_dst_port_enabled", Bool, false, false, "enable exact TCP destination-port matching for IPv4/IPv6 tables"),
             f!(
                 "stage",
                 Enum(&["ingress", "egress"]),
@@ -300,13 +327,15 @@ pub fn fields(kind: &str) -> &'static [Field] {
             ),
             f!(
                 "family",
-                Enum(&["ipv4", "ipv6"]),
+                Enum(&["ipv4", "ipv6", "mac"]),
                 true,
                 false,
-                "ipv4/ipv6 src/dst matching; create-only"
+                "ipv4/ipv6 or family-independent mac matching (including non-IP); create-only"
             ),
         ],
         "acl_entry" => &[
+            f!("src_mac", Mac, false, true, "exact source-MAC match; requires table field enabled"),
+            f!("l4_dst_port", Number(0, 65535), false, true, "exact TCP destination port; create requires protocol=6 and enabled table field"),
             f!(
                 "table",
                 Oid(&["acl_table"], false),
@@ -466,6 +495,33 @@ pub fn cidr(value: &str) -> Result<String, String> {
         _ => Err("IPv4 prefix must be 0..32; IPv6 0..128".into()),
     }
 }
+pub fn host_cidr(raw: &str) -> Result<String, String> {
+    // Check family/prefix syntax through the route parser, but DO NOT use its
+    // network-masked result for an interface's local address.
+    cidr(raw)?;
+    let (host, prefix) = raw.split_once('/').ok_or("expected HOST/prefix-length")?;
+    let ip: IpAddr = host.parse().map_err(|_| "invalid interface address")?;
+    if ip.is_unspecified() || ip.is_multicast() || ip.is_loopback() {
+        return Err("interface address must be a non-loopback unicast address".into());
+    }
+    let prefix: u32 = prefix.parse().map_err(|_| "invalid prefix length")?;
+    if let IpAddr::V4(ip) = ip {
+        let value = u32::from(ip);
+        if ip.is_broadcast()
+            || (prefix < 31 && {
+                let mask = if prefix == 0 {
+                    u32::MAX
+                } else {
+                    u32::MAX >> prefix
+                };
+                value & mask == 0 || value & mask == mask
+            })
+        {
+            return Err("IPv4 interface address cannot be a network/broadcast address".into());
+        }
+    }
+    Ok(format!("{ip}/{prefix}"))
+}
 fn mac(value: &str) -> Result<String, String> {
     let octets: Vec<_> = value.split(':').collect();
     if octets.len() != 6
@@ -494,24 +550,45 @@ pub(crate) fn value(rule: Value, raw: &str) -> Result<String, String> {
             Ok(n.to_string())
         }
         Oid(_, zero) => oid(raw, zero),
+        OidList(_) => {
+            if raw.is_empty() {
+                return Ok(String::new());
+            }
+            let mut seen = std::collections::BTreeSet::new();
+            let mut list = Vec::new();
+            for item in raw.split(',') {
+                let item = oid(item, false)?;
+                if !seen.insert(item.clone()) {
+                    return Err("duplicate OID in list".into());
+                }
+                list.push(item);
+            }
+            Ok(list.join(","))
+        }
         Enum(options) if options.contains(&raw) => Ok(raw.into()),
         Enum(options) => Err(format!("expected {}", options.join("/"))),
         Ip => raw
             .parse::<IpAddr>()
             .map(|ip| ip.to_string())
             .map_err(|_| "invalid IPv4/IPv6 address".into()),
+        Ipv4 => raw
+            .parse::<std::net::Ipv4Addr>()
+            .map(|ip| ip.to_string())
+            .map_err(|_| "expected IPv4 address".into()),
         Cidr => cidr(raw),
+        HostCidr => host_cidr(raw),
         Mac => mac(raw),
     }
 }
 pub fn key(kind: &str, raw: &str) -> Result<String, String> {
-    if matches!(kind, "route" | "neighbor" | "fdb") {
+    if matches!(kind, "route" | "neighbor" | "fdb" | "interface_address") {
         let (a, b) = raw
             .split_once('@')
             .ok_or("expected OID@CIDR, OID@IP or OID@MAC key")?;
         let b = match kind {
             "route" => cidr(b)?,
             "neighbor" => value(Ip, b)?,
+            "interface_address" => host_cidr(b)?,
             _ => mac(b)?,
         };
         Ok(format!("{}@{}", oid(a, false)?, b))
@@ -604,6 +681,24 @@ pub fn parse(input: &str) -> Result<Command, String> {
     } else if attrs.is_empty() {
         return Err("set requires at least one writable field".into());
     }
+    if kind == "acl_table"
+        && attrs.get("family").is_some_and(|f| f == "mac")
+        && (attrs.get("src_mac_enabled").is_some_and(|v| v == "false")
+            || attrs
+                .get("l4_dst_port_enabled")
+                .is_some_and(|v| v == "true"))
+    {
+        return Err(
+            "MAC-only table requires source MAC enabled and cannot enable TCP ports".into(),
+        );
+    }
+    if kind == "acl_entry"
+        && attrs.contains_key("l4_dst_port")
+        && (attrs.get("protocol").is_some_and(|v| v != "6")
+            || (op == "create" && !attrs.contains_key("protocol")))
+    {
+        return Err("l4_dst_port requires TCP protocol=6".into());
+    }
     if kind == "acl_entry"
         && attrs
             .get("src")
@@ -643,6 +738,56 @@ pub fn approve(command: &Command, explicit: bool) -> Result<Option<Approval>, St
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preset_extensions_validate_and_preserve_local_host_addresses() {
+        assert_eq!(host_cidr("10.101.0.1/24").unwrap(), "10.101.0.1/24");
+        assert_eq!(
+            host_cidr("2001:db8:101::1/64").unwrap(),
+            "2001:db8:101::1/64"
+        );
+        assert_eq!(cidr("10.101.0.1/24").unwrap(), "10.101.0.0/24");
+        assert_eq!(
+            key("interface_address", "1@2001:db8:101::1/64").unwrap(),
+            "0x1@2001:db8:101::1/64"
+        );
+        for bad in [
+            "10.101.0.0/24",
+            "10.101.0.255/24",
+            "0.0.0.0/0",
+            "::/64",
+            "ff02::1/64",
+            "127.0.0.1/8",
+            "2001:db8::1/129",
+        ] {
+            assert!(host_cidr(bad).is_err(), "{bad}");
+        }
+        for good in [
+            "create interface_address router_interface=1 ingress_port=2 address=10.101.0.1/24",
+            "create interface_address router_interface=1 ingress_port=2 address=2001:db8:101::1/64",
+            "create mirror_session monitor_port=1 src_ip=192.0.2.1 dst_ip=192.0.2.2 src_mac=02:00:00:00:00:01 dst_mac=02:00:00:00:00:02 ttl=64 tos=0",
+            "set port 1 egress_mirror_sessions=2,0x3",
+            "set port 1 egress_mirror_sessions=",
+            "set port 1 speed=100000",
+            "create acl_table stage=ingress family=mac src_mac_enabled=true",
+            "create acl_table stage=ingress family=ipv6 l4_dst_port_enabled=true",
+            "create acl_entry table=1 priority=100 action=deny src_mac=02:00:00:00:00:aa",
+            "create acl_entry table=1 priority=100 action=deny protocol=6 l4_dst_port=4444",
+        ] { assert!(parse(good).is_ok(), "{good}"); }
+        for bad in [
+            "set port 1 egress_mirror_sessions=2,0x2",
+            "set port 1 egress_mirror_sessions=0",
+            "set port 1 egress_mirror_sessions=1,",
+            "create acl_table stage=ingress family=mac l4_dst_port_enabled=true",
+            "create acl_table stage=ingress family=mac src_mac_enabled=false",
+            "create acl_entry table=1 priority=100 action=deny l4_dst_port=4444",
+            "create acl_entry table=1 priority=100 action=deny protocol=17 l4_dst_port=4444",
+            "create acl_entry table=1 priority=100 action=deny protocol=6 l4_dst_port=65536",
+            "set interface_address 1@10.101.0.1/24 address=10.101.0.2/24",
+            "set mirror_session 1 dst_ip=2001:db8::1",
+        ] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
+    }
     #[test]
     fn valid_contract_kinds() {
         for s in ["set port 1 admin=true pvid=100 ingress_acl=0x0", "create vlan vlan_id=100", "create bridge_port port=1 learning=disable", "create vlan_member vlan=2 bridge_port=3 tagging=untagged", "create virtual_router", "create router_interface virtual_router=1 vlan=2 src_mac=AA:BB:CC:DD:EE:FF mtu=9000 ipv6=true", "create next_hop router_interface=1 ip=2001:db8::1", "create neighbor router_interface=1 ip=192.0.2.1 mac=00:11:22:33:44:55", "create route virtual_router=1 prefix=2001:db8::1/64 next_hop=3", "set route 1@198.19.202.0/24 next_hop=0x0 action=drop", "create acl_table stage=ingress family=ipv6", "create acl_entry table=1 priority=4294967295 action=permit src=2001:db8::/32 protocol=255 enable=true", "create acl_group stage=ingress", "create acl_group_member group=1 table=2 priority=0", "get fdb 1@00:11:22:33:44:55", "get switch 1", "remove neighbor 1@::1", "set route 1@192.0.2.42/24 action=drop"] { assert!(parse(s).is_ok(),"{s}: {:?}",parse(s)); }
