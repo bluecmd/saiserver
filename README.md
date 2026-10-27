@@ -47,10 +47,12 @@ cargo build --manifest-path tui/Cargo.toml --release --locked
 ```
 
 Use `1`–`7`/Tab for pages, `j`/`k` to select, `r` to refresh/reconnect, `:` for
-commands, `y` to confirm a reviewed mutation and `q` to quit. `--help` describes
+commands, `p` to load a switch preset locally, `a` to separately review applying
+it, `y` to confirm the labelled review action and `q` to quit. `--help` describes
 headless JSON commands and sampling. The protocol has no authentication/TLS;
 use an isolated host or SSH tunnel, not an untrusted network.
 
+- [Switch presets: Seastone 2, separate load/apply, ERSPAN and operational ARP/NDP](docs/switch-presets.md)
 - [Build, keys, workflows, tests and limitations](docs/tui.md)
 - [Bounded Thrift contract](docs/tui-api.md) and [server adapter/build](docs/server-api.md)
 - [Actual sw4/EOS verification, recorded TUI and restoration](docs/lab-verification.md)

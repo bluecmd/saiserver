@@ -1,0 +1,68 @@
+# Proposed Rust dependency portion of the parent's MODULE.bazel.
+# Merge with the parent's declarations; do not duplicate bazel_dep/use_repo calls.
+# Verified against the rules_rust 0.75.0 release source, not the moving main branch:
+# https://github.com/bazelbuild/rules_rust/releases/tag/0.75.0
+bazel_dep(name = "rules_rust", version = "0.75.0")
+bazel_dep(name = "platforms", version = "1.1.0")
+
+# Parent owns action toolchain configuration/registration. It must register
+# downloaded Rust 1.94.0 (edition 2021, no additional target triples required)
+# and the pinned hermetic toolchains_llvm_bootstrapped 0.5.9 C/C++ toolchain,
+# including its Linux sysroot. Do not fall back to local_config_cc/system SDKs.
+# The hashes below can also be passed as sha256s to rust.toolchain or
+# rust.repository_set by the root module. Set rustfmt_version = "1.94.0" too,
+# rather than allowing the default nightly formatter. Only Linux x86_64 is
+# supported by these BUILD targets; this is not a cross-platform toolchain pin.
+# Hashes are from https://static.rust-lang.org/dist/channel-rust-1.94.0.toml.
+SAISERVER_RUST_SHA256S = {
+    "cargo-1.94.0-x86_64-unknown-linux-gnu.tar.xz": "8e17624f3de39e079845bfb25ed15a042f4b50ceca78e37c56c4b9b15949b9f7",
+    "clippy-1.94.0-x86_64-unknown-linux-gnu.tar.xz": "935529b0b9150084fa9cc1734c6598efe86b6e7d76f31ad3f8d4bb79ebf6031a",
+    "llvm-tools-1.94.0-x86_64-unknown-linux-gnu.tar.xz": "cf6b8e1d3e48ffa4db37aa59f55382b991f0d347d9b62eebc9ef1d80dffabef4",
+    "rust-std-1.94.0-x86_64-unknown-linux-gnu.tar.xz": "dd33653107c36e040082050d9e547e64dac5b456ba74069430d838c00c189a05",
+    "rustc-1.94.0-x86_64-unknown-linux-gnu.tar.xz": "31a0d3ac9383dfdeb4fce86eeed5ade3230131c635264c0eab7252dbf235f28e",
+    "rustfmt-1.94.0-x86_64-unknown-linux-gnu.tar.xz": "903e768f7626f78ed2d6cb82c1820b93bd339afec8575102e847fd3a379d33e5",
+}
+
+# crate_universe resolves metadata using downloaded host tools, not PATH cargo
+# or rustc. Use a unique repository name: rules_rust itself also declares a
+# rust_host_tools repository. This extension is distinct from action toolchains.
+rust_host = use_extension("@rules_rust//rust:extensions.bzl", "rust_host_tools")
+rust_host.host_tools(
+    name = "saiserver_rust_host_tools",
+    version = "1.94.0",
+    rustfmt_version = "1.94.0",
+    sha256s = SAISERVER_RUST_SHA256S,
+)
+use_repo(rust_host, "saiserver_rust_host_tools")
+
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "saiserver_crates",
+    cargo_lockfile = "//tui:Cargo.lock",
+    manifests = ["//tui:Cargo.toml"],
+    host_tools = "@saiserver_rust_host_tools//:BUILD.bazel",
+    isolated = True,
+    skip_cargo_lockfile_overwrite = True,
+    supported_platform_triples = ["x86_64-unknown-linux-gnu"],
+)
+use_repo(crate, "saiserver_crates")
+
+# The parent must also provide a root BUILD.bazel (even an empty file):
+# crate_universe 0.75.0 resolves the root //:MODULE.bazel label internally.
+# Parent IDL contract: //src:sai_tui_rs must be visible to //tui and expose
+# exactly one generated .rs file from the declared, downloaded Thrift compiler.
+# No generator invocation is embedded in these Rust rules.
+#
+# Public API (also usable as @saiserver//tui:... by downstream modules):
+#   //tui:sai_tui       Rust library, crate name sai_tui (checked-in RPC module)
+#   //tui:sai-tui       executable
+#   //tui:sai_tui_rpc   standalone generated library, crate name sai_tui_rpc
+#   //tui:tests         library unit tests plus cli_test and safety_test
+#
+# Integration verification after the parent installs MODULE/native rules:
+#   bazel build //tui:sai_tui //tui:sai-tui //tui:sai_tui_rpc
+#   bazel test //tui:tests --test_output=errors
+# Also test from a downstream local_path_override consumer to verify external
+# repository runfiles paths. cli_test declares :sai-tui in data and embeds its
+# $(rootpath), which remains relative to the main repository's test runfiles
+# working directory (including ../<external-repository>/... when consumed).
