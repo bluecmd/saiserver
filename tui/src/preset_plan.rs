@@ -160,6 +160,10 @@ pub fn build(bound: &BoundPreset, inventory: &Inventory) -> Result<Plan, String>
         }
     }
     let mut ops = Vec::new();
+    // Interface-address records are compiled LAST (see the final phase below):
+    // the integrated server rejects SAI topology mutations while any address is
+    // active, so every topology change must precede address creation.
+    let mut address_plan: Vec<(String, Vec<String>)> = Vec::new();
     // Fail closed throughout nontransactional setup. Each administrative write
     // is separately read back; no forwarding change happens before all are down.
     for port in &bound.preset.ports {
@@ -344,16 +348,16 @@ pub fn build(bound: &BoundPreset, inventory: &Inventory) -> Result<Plan, String>
             &format!("rif-{}", port.name),
             rif_attrs,
         );
+        address_plan.push((
+            port.name.clone(),
+            addresses.iter().map(|a| (*a).clone()).collect(),
+        ));
+        // Connected routes are pure forwarding state; they do not change the
+        // attachments the responder validates. Collector L3 state is created
+        // with the other non-address topology, BEFORE any interface address,
+        // because the server rejects SAI topology mutations while addresses
+        // are active (see tui_rpc mutation_guard).
         for address in addresses {
-            entry(
-                &mut ops,
-                "interface_address",
-                vec![
-                    ("router_interface", V::Reference(rif.clone())),
-                    ("ingress_port", V::Reference(port_ref.clone())),
-                    ("address", literal(address)),
-                ],
-            );
             entry(
                 &mut ops,
                 "route",
@@ -422,6 +426,30 @@ pub fn build(bound: &BoundPreset, inventory: &Inventory) -> Result<Plan, String>
             target: Target::Object(reference("port", &bound.port_oids[&port.name])),
             attrs: attributes(vec![("admin", literal(true))]),
         });
+    }
+    // Operational ARP/NDP addresses are created only after ALL topology and
+    // port mutations. The responder must already be running (server opt-in);
+    // a create activates real replies immediately, validated against actual
+    // RIF/attachment getters. No further SAI topology mutation follows.
+    for (name, addresses) in &address_plan {
+        let rif = R::Created {
+            kind: "router_interface".into(),
+            symbol: format!("rif-{name}"),
+        };
+        for address in addresses {
+            entry(
+                &mut ops,
+                "interface_address",
+                vec![
+                    ("router_interface", V::Reference(rif.clone())),
+                    (
+                        "ingress_port",
+                        V::Reference(reference("port", &bound.port_oids[name])),
+                    ),
+                    ("address", literal(address)),
+                ],
+            );
+        }
     }
     let plan = Plan {
         id: bound.preset.id.clone(),
@@ -620,6 +648,19 @@ mod tests {
         }
         assert_eq!(protected.len(), 32);
         assert!(down.is_empty());
+        // The integrated server rejects SAI topology mutations while addresses
+        // are active; every address create must follow the last port mutation.
+        let last_port = validation
+            .preview
+            .iter()
+            .rposition(|cmd| matches!(cmd, command::Command::Set { kind, .. } if kind == "port"))
+            .unwrap();
+        let first_address = validation
+            .preview
+            .iter()
+            .position(|cmd| matches!(cmd, command::Command::Create { kind, .. } if kind == "interface_address"))
+            .unwrap();
+        assert!(last_port < first_address);
         assert!(plan.operations.len() < config::MAX_OPERATIONS);
     }
 
