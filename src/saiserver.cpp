@@ -353,10 +353,30 @@ int main(int argc, char* argv[]) {
   attr[0].id = SAI_SWITCH_ATTR_INIT_SWITCH;
   attr[0].value.booldata = true;
 
-  sai_mac_t mac = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
-
   // NOTE: Seems like Broadcom SAI at least requires the MAC to be set
-  // when init'ing or it will return SAI_STATUS_FAILURE.
+  // when init'ing or it will return SAI_STATUS_FAILURE, and Broadcom's SAI
+  // rejects an all-zero MAC with SAI_STATUS_INVALID_PARAMETER before it touches
+  // the ASIC. Default to the historical value, but allow deployments to supply
+  // their own switch MAC through SAI_SRC_MAC (aa:bb:cc:dd:ee:ff) so that the
+  // server does not force a fixed address onto every box.
+  sai_mac_t mac = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  const char* src_mac_env = getenv("SAI_SRC_MAC");
+  if (src_mac_env != nullptr && src_mac_env[0] != '\0') {
+    unsigned int b[6];
+    char tail = 0;
+    if (sscanf(src_mac_env, "%2x:%2x:%2x:%2x:%2x:%2x%c",
+               &b[0], &b[1], &b[2], &b[3], &b[4], &b[5], &tail) != 6) {
+      fprintf(stderr, "SAI_SRC_MAC must be six colon-separated hex bytes, got %s\n",
+              src_mac_env);
+      exit(EXIT_FAILURE);
+    }
+    for (int i = 0; i < 6; i++) {
+      mac[i] = static_cast<unsigned char>(b[i]);
+    }
+  }
+  printf("Switch source MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
+         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
   attr[1].id = SAI_SWITCH_ATTR_SRC_MAC_ADDRESS;
   memcpy(attr[1].value.mac, mac, sizeof(mac));
 
