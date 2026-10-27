@@ -1,4 +1,45 @@
-# Usage inside SONiC
+# saiserver and sai-tui
+
+`sai-tui` is a Rust/Ratatui client for bounded SAI management over the existing
+binary/buffered Thrift endpoint. It provides VLAN/access/trunk and L2 FDB views,
+IPv4/IPv6 router-interface/neighbor/next-hop/route management, basic permit/deny
+ACLs and bindings, plus live unsigned port counters and traffic-rate graphs.
+Mutations require an explicit review/confirmation and real server readback;
+unsupported or unverified operations remain visible failures, never fake state.
+
+## Run the TUI
+
+Requires Rust 1.89+ and an **already running compatible saiserver**:
+
+```sh
+cargo build --manifest-path tui/Cargo.toml --release --locked
+./tui/target/release/sai-tui --endpoint 127.0.0.1:9090
+```
+
+Use `1`–`7`/Tab for pages, `j`/`k` to select, `r` to refresh/reconnect, `:` for
+commands, `y` to confirm a reviewed mutation and `q` to quit. `--help` describes
+headless JSON commands and sampling. The protocol has no authentication/TLS;
+use an isolated host or SSH tunnel, not an untrusted network.
+
+- [Build, keys, workflows, tests and limitations](docs/tui.md)
+- [Bounded Thrift contract](docs/tui-api.md) and [server adapter/build](docs/server-api.md)
+- [Actual sw4/EOS verification, recorded TUI and restoration](docs/lab-verification.md)
+
+The live record covers access/trunk forwarding, FDB learning, explicit IPv4/IPv6
+routing, ACL deny/permit/bind/unbind effects and nonzero counter graphs. It also
+identifies Broadcom SDK getter/deletion-verification limits and tagging changes
+that require explicit replacement. The lab was restored to SONiC afterward;
+a test server is deliberately **not** left owning its ASIC.
+
+## Usage inside SONiC
+
+**Starting saiserver initializes the ASIC and can interrupt all forwarding.**
+Do not run it alongside SONiC's SDK owner or stop SONiC on a shared switch
+without explicit authority and a restoration baseline. For an authorized
+unattended session, `--no-shell` disables the interactive SDK shell. Container
+runs of the tested SDK need `--shm-size=512m`; the default 64MiB is insufficient.
+The commands below are low-level SDK setup, not prerequisites for merely
+building the Rust client.
 
 ```
 sudo apt install binutils g++ libthrift-dev make thrift-compiler libboost1.74-dev lz4

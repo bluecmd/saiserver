@@ -1,0 +1,696 @@
+{
+  "recorded_date": "2026-10-27",
+  "hosts": {
+    "sai": "ixp-lab-sw4",
+    "verifier": "ixp-lab-eos1",
+    "sw2_modified": false
+  },
+  "transport": "Thrift binary / buffered TCP 127.0.0.1:9090",
+  "versions": {
+    "sai": "1.18.1",
+    "vendor_package": "libsaibcm 15.2.1.0.0.0.26.3",
+    "cpp_thrift": "0.19.0",
+    "rust_thrift": "0.25.0"
+  },
+  "ports": {
+    "lane9": "0x100000009",
+    "lane10": "0x10000000a"
+  },
+  "vlan": {
+    "kind": "vlan",
+    "key": "0x2600000f3d"
+  },
+  "l2_probes": [
+    {
+      "sent": 5,
+      "received": 5,
+      "tx": [
+        "ns-SAI-TUI-A",
+        "et9_1"
+      ],
+      "rx": [
+        "ns-SAI-TUI-B",
+        "vlan3901"
+      ],
+      "ip_families": [
+        "ipv4"
+      ],
+      "ttl_or_hop_limit": [
+        64
+      ],
+      "source_macs": [
+        "02:00:00:00:a0:01"
+      ],
+      "destination_macs": [
+        "74:83:ef:3f:2c:fd"
+      ]
+    },
+    {
+      "sent": 5,
+      "received": 5,
+      "tx": [
+        "default",
+        "et9_2"
+      ],
+      "rx": [
+        "ns-SAI-TUI-A",
+        "et9_1"
+      ],
+      "ip_families": [
+        "ipv4"
+      ],
+      "ttl_or_hop_limit": [
+        64
+      ],
+      "source_macs": [
+        "02:00:00:00:b0:01"
+      ],
+      "destination_macs": [
+        "74:83:ef:3f:2c:fd"
+      ]
+    },
+    {
+      "sent": 5,
+      "received": 5,
+      "tx": [
+        "ns-SAI-TUI-A",
+        "et9_1"
+      ],
+      "rx": [
+        "ns-SAI-TUI-B",
+        "vlan3901"
+      ],
+      "ip_families": [
+        "ipv6"
+      ],
+      "ttl_or_hop_limit": [
+        64
+      ],
+      "source_macs": [
+        "02:00:00:00:a0:01"
+      ],
+      "destination_macs": [
+        "74:83:ef:3f:2c:fd"
+      ]
+    },
+    {
+      "sent": 5,
+      "received": 5,
+      "tx": [
+        "default",
+        "et9_2"
+      ],
+      "rx": [
+        "ns-SAI-TUI-A",
+        "et9_1"
+      ],
+      "ip_families": [
+        "ipv6"
+      ],
+      "ttl_or_hop_limit": [
+        64
+      ],
+      "source_macs": [
+        "02:00:00:00:b0:01"
+      ],
+      "destination_macs": [
+        "74:83:ef:3f:2c:fd"
+      ]
+    }
+  ],
+  "fdb": {
+    "attributes": {
+      "bridge_port": "0x1003a00000009",
+      "mac": "02:00:00:00:a0:01",
+      "type": "0",
+      "vlan": "0x2600000f3d"
+    },
+    "key": "0x2600000f3d@02:00:00:00:a0:01",
+    "kind": "fdb"
+  },
+  "explicit_l3_probes": [
+    {
+      "sent": 5,
+      "received": 5,
+      "tx": [
+        "ns-SAI-TUI-A",
+        "et9_1"
+      ],
+      "rx": [
+        "ns-SAI-TUI-B",
+        "et9_2"
+      ],
+      "ip_families": [
+        "ipv4"
+      ],
+      "ttl_or_hop_limit": [
+        63
+      ],
+      "source_macs": [
+        "02:00:00:00:04:01"
+      ],
+      "destination_macs": [
+        "74:83:ef:3f:2c:fd"
+      ]
+    },
+    {
+      "sent": 5,
+      "received": 5,
+      "tx": [
+        "ns-SAI-TUI-B",
+        "et9_2"
+      ],
+      "rx": [
+        "ns-SAI-TUI-A",
+        "et9_1"
+      ],
+      "ip_families": [
+        "ipv4"
+      ],
+      "ttl_or_hop_limit": [
+        63
+      ],
+      "source_macs": [
+        "02:00:00:00:04:01"
+      ],
+      "destination_macs": [
+        "74:83:ef:3f:2c:fd"
+      ]
+    },
+    {
+      "sent": 5,
+      "received": 5,
+      "tx": [
+        "ns-SAI-TUI-A",
+        "et9_1"
+      ],
+      "rx": [
+        "ns-SAI-TUI-B",
+        "et9_2"
+      ],
+      "ip_families": [
+        "ipv6"
+      ],
+      "ttl_or_hop_limit": [
+        63
+      ],
+      "source_macs": [
+        "02:00:00:00:04:01"
+      ],
+      "destination_macs": [
+        "74:83:ef:3f:2c:fd"
+      ]
+    },
+    {
+      "sent": 5,
+      "received": 5,
+      "tx": [
+        "ns-SAI-TUI-B",
+        "et9_2"
+      ],
+      "rx": [
+        "ns-SAI-TUI-A",
+        "et9_1"
+      ],
+      "ip_families": [
+        "ipv6"
+      ],
+      "ttl_or_hop_limit": [
+        63
+      ],
+      "source_macs": [
+        "02:00:00:00:04:01"
+      ],
+      "destination_macs": [
+        "74:83:ef:3f:2c:fd"
+      ]
+    }
+  ],
+  "route_update": {
+    "v4": {
+      "drop": {
+        "sent": 5,
+        "received": 0,
+        "tx": [
+          "ns-SAI-TUI-A",
+          "et9_1"
+        ],
+        "rx": [
+          "ns-SAI-TUI-B",
+          "et9_2"
+        ],
+        "ip_families": [],
+        "ttl_or_hop_limit": [],
+        "source_macs": [],
+        "destination_macs": []
+      },
+      "forward": {
+        "sent": 5,
+        "received": 5,
+        "tx": [
+          "ns-SAI-TUI-A",
+          "et9_1"
+        ],
+        "rx": [
+          "ns-SAI-TUI-B",
+          "et9_2"
+        ],
+        "ip_families": [
+          "ipv4"
+        ],
+        "ttl_or_hop_limit": [
+          63
+        ],
+        "source_macs": [
+          "02:00:00:00:04:01"
+        ],
+        "destination_macs": [
+          "74:83:ef:3f:2c:fd"
+        ]
+      }
+    },
+    "v6": {
+      "drop": {
+        "sent": 5,
+        "received": 0,
+        "tx": [
+          "ns-SAI-TUI-A",
+          "et9_1"
+        ],
+        "rx": [
+          "ns-SAI-TUI-B",
+          "et9_2"
+        ],
+        "ip_families": [],
+        "ttl_or_hop_limit": [],
+        "source_macs": [],
+        "destination_macs": []
+      },
+      "forward": {
+        "sent": 5,
+        "received": 5,
+        "tx": [
+          "ns-SAI-TUI-A",
+          "et9_1"
+        ],
+        "rx": [
+          "ns-SAI-TUI-B",
+          "et9_2"
+        ],
+        "ip_families": [
+          "ipv6"
+        ],
+        "ttl_or_hop_limit": [
+          63
+        ],
+        "source_macs": [
+          "02:00:00:00:04:01"
+        ],
+        "destination_macs": [
+          "74:83:ef:3f:2c:fd"
+        ]
+      }
+    }
+  },
+  "route_deletion": {
+    "v4": {
+      "sent": 5,
+      "received": 0,
+      "tx": [
+        "ns-SAI-TUI-A",
+        "et9_1"
+      ],
+      "rx": [
+        "ns-SAI-TUI-B",
+        "et9_2"
+      ],
+      "ip_families": [],
+      "ttl_or_hop_limit": [],
+      "source_macs": [],
+      "destination_macs": []
+    },
+    "v6": {
+      "sent": 5,
+      "received": 0,
+      "tx": [
+        "ns-SAI-TUI-A",
+        "et9_1"
+      ],
+      "rx": [
+        "ns-SAI-TUI-B",
+        "et9_2"
+      ],
+      "ip_families": [],
+      "ttl_or_hop_limit": [],
+      "source_macs": [],
+      "destination_macs": []
+    }
+  },
+  "acl": {
+    "ipv4": {
+      "deny": {
+        "sent": 5,
+        "received": 0,
+        "tx": [
+          "ns-SAI-TUI-A",
+          "et9_1"
+        ],
+        "rx": [
+          "ns-SAI-TUI-B",
+          "vlan3901"
+        ],
+        "ip_families": [],
+        "ttl_or_hop_limit": [],
+        "source_macs": [],
+        "destination_macs": []
+      },
+      "permit": {
+        "sent": 5,
+        "received": 5,
+        "tx": [
+          "ns-SAI-TUI-A",
+          "et9_1"
+        ],
+        "rx": [
+          "ns-SAI-TUI-B",
+          "vlan3901"
+        ],
+        "ip_families": [
+          "ipv4"
+        ],
+        "ttl_or_hop_limit": [
+          64
+        ],
+        "source_macs": [
+          "02:00:00:00:a0:01"
+        ],
+        "destination_macs": [
+          "74:83:ef:3f:2c:fd"
+        ]
+      },
+      "unbound_deny": {
+        "sent": 5,
+        "received": 5,
+        "tx": [
+          "ns-SAI-TUI-A",
+          "et9_1"
+        ],
+        "rx": [
+          "ns-SAI-TUI-B",
+          "vlan3901"
+        ],
+        "ip_families": [
+          "ipv4"
+        ],
+        "ttl_or_hop_limit": [
+          64
+        ],
+        "source_macs": [
+          "02:00:00:00:a0:01"
+        ],
+        "destination_macs": [
+          "74:83:ef:3f:2c:fd"
+        ]
+      },
+      "rebound_deny": {
+        "sent": 5,
+        "received": 0,
+        "tx": [
+          "ns-SAI-TUI-A",
+          "et9_1"
+        ],
+        "rx": [
+          "ns-SAI-TUI-B",
+          "vlan3901"
+        ],
+        "ip_families": [],
+        "ttl_or_hop_limit": [],
+        "source_macs": [],
+        "destination_macs": []
+      }
+    },
+    "ipv6": {
+      "deny": {
+        "sent": 5,
+        "received": 0,
+        "tx": [
+          "ns-SAI-TUI-A",
+          "et9_1"
+        ],
+        "rx": [
+          "ns-SAI-TUI-B",
+          "vlan3901"
+        ],
+        "ip_families": [],
+        "ttl_or_hop_limit": [],
+        "source_macs": [],
+        "destination_macs": []
+      },
+      "permit": {
+        "sent": 5,
+        "received": 5,
+        "tx": [
+          "ns-SAI-TUI-A",
+          "et9_1"
+        ],
+        "rx": [
+          "ns-SAI-TUI-B",
+          "vlan3901"
+        ],
+        "ip_families": [
+          "ipv6"
+        ],
+        "ttl_or_hop_limit": [
+          64
+        ],
+        "source_macs": [
+          "02:00:00:00:a0:01"
+        ],
+        "destination_macs": [
+          "74:83:ef:3f:2c:fd"
+        ]
+      },
+      "unbound_deny": {
+        "sent": 5,
+        "received": 5,
+        "tx": [
+          "ns-SAI-TUI-A",
+          "et9_1"
+        ],
+        "rx": [
+          "ns-SAI-TUI-B",
+          "vlan3901"
+        ],
+        "ip_families": [
+          "ipv6"
+        ],
+        "ttl_or_hop_limit": [
+          64
+        ],
+        "source_macs": [
+          "02:00:00:00:a0:01"
+        ],
+        "destination_macs": [
+          "74:83:ef:3f:2c:fd"
+        ]
+      },
+      "rebound_deny": {
+        "sent": 5,
+        "received": 0,
+        "tx": [
+          "ns-SAI-TUI-A",
+          "et9_1"
+        ],
+        "rx": [
+          "ns-SAI-TUI-B",
+          "vlan3901"
+        ],
+        "ip_families": [],
+        "ttl_or_hop_limit": [],
+        "source_macs": [],
+        "destination_macs": []
+      }
+    }
+  },
+  "tagging_replacement": {
+    "tagged": {
+      "sent": 5,
+      "received": 0,
+      "tx": [
+        "default",
+        "et9_2"
+      ],
+      "rx": [
+        "ns-SAI-TUI-A",
+        "et9_1"
+      ],
+      "ip_families": [],
+      "ttl_or_hop_limit": [],
+      "source_macs": [],
+      "destination_macs": []
+    },
+    "untagged": {
+      "sent": 5,
+      "received": 5,
+      "tx": [
+        "default",
+        "et9_2"
+      ],
+      "rx": [
+        "ns-SAI-TUI-A",
+        "et9_1"
+      ],
+      "ip_families": [
+        "ipv4"
+      ],
+      "ttl_or_hop_limit": [
+        64
+      ],
+      "source_macs": [
+        "02:00:00:00:b0:01"
+      ],
+      "destination_macs": [
+        "74:83:ef:3f:2c:fd"
+      ]
+    }
+  },
+  "membership_removed": {
+    "sent": 5,
+    "received": 0,
+    "tx": [
+      "default",
+      "et9_2"
+    ],
+    "rx": [
+      "ns-SAI-TUI-A",
+      "et9_1"
+    ],
+    "ip_families": [],
+    "ttl_or_hop_limit": [],
+    "source_macs": [],
+    "destination_macs": []
+  },
+  "vlan_duplicate_create_rejected_status": -6,
+  "vlan_recreated_after_acknowledged_removal": "0x2600000f3d",
+  "interactive": {
+    "result": {
+      "command": [
+        "ssh",
+        "-tt",
+        "ixp-lab-sw4.local.sonix.network",
+        "sudo -n ip vrf exec default /home/bluecmd/saitui-lab/sai-tui --endpoint 127.0.0.1:9090 --timeout-ms 10000 --interval-ms 500"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "actions_sent": 12,
+      "screen_snapshots": 13
+    },
+    "traffic": [
+      [
+        200,
+        200
+      ],
+      [
+        200,
+        200
+      ],
+      [
+        200,
+        200
+      ],
+      [
+        200,
+        200
+      ]
+    ],
+    "counter_samples": [
+      {
+        "sample": 1,
+        "in_octets": 11591,
+        "in_bps": null
+      },
+      {
+        "sample": 2,
+        "in_octets": 11591,
+        "in_bps": 0.0
+      },
+      {
+        "sample": 3,
+        "in_octets": 27791,
+        "in_bps": 129590.22591639071
+      },
+      {
+        "sample": 4,
+        "in_octets": 27791,
+        "in_bps": 0.0
+      },
+      {
+        "sample": 5,
+        "in_octets": 43991,
+        "in_bps": 129604.88636342567
+      },
+      {
+        "sample": 6,
+        "in_octets": 43991,
+        "in_bps": 0.0
+      },
+      {
+        "sample": 7,
+        "in_octets": 60191,
+        "in_bps": 129612.21996971096
+      },
+      {
+        "sample": 8,
+        "in_octets": 60191,
+        "in_bps": 0.0
+      },
+      {
+        "sample": 9,
+        "in_octets": 76391,
+        "in_bps": 129584.90037865318
+      },
+      {
+        "sample": 10,
+        "in_octets": 76602,
+        "in_bps": 1687.751780657867
+      },
+      {
+        "sample": 11,
+        "in_octets": 76602,
+        "in_bps": 0.0
+      },
+      {
+        "sample": 12,
+        "in_octets": 76602,
+        "in_bps": 0.0
+      }
+    ],
+    "raw_ansi_sha256": "a71568ac0b441e07d3d95a87ba08ecd48bae495b79bb81684b71539b20af433a"
+  },
+  "limitations": [
+    "Port ingress/egress ACL getters return -196608; binding writes remain overall verification failures, with effects independently verified by traffic.",
+    "Tagging set returns NOT_SUPPORTED (-15); explicit confirmed remove/create replacement is traffic-verified.",
+    "Empty VLAN/RIF/ACL-group getters may remain readable after remove; next-hop getters may return -5. Absence remains explicitly unverified, never fabricated.",
+    "Inventory is process-local/nonexhaustive; FDB keys notification-derived and attributes getter-verified.",
+    "SAI automatic neighbor host routes can take precedence over explicit LPM routes; remote prefixes used for actual route proof."
+  ],
+  "restoration": {
+    "sonic_saved_config_sha256": "dd218a822ae70666722c3641b10ebd3ec0a4cd0f2faac23437526af643e537e7",
+    "running_CONFIG_DB_equal": true,
+    "port_rows_equal": 38,
+    "eos_touched_and_untouched_interface_configs_equal": true,
+    "test_vrf_vlan_svi_loopback_removed": true,
+    "syncd": "active",
+    "swss": "active",
+    "restored_modules": [
+      "psample",
+      "linux_knet_cb"
+    ],
+    "portchannel4": "up, all three members selected",
+    "ring_Ethernet120": "up",
+    "test_containers": "removed",
+    "saiserver_listener": "stopped",
+    "management": "SSH verified on both hosts"
+  },
+  "private_audit_sha256": "bd2fca0aaa00cf47cda5949817237ba5c3baee1b972e31229a592045de467286"
+}
