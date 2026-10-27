@@ -88,6 +88,14 @@ Wire reads are capped at 16 MiB per response, strings at 1 MiB, containers at
 65,536 elements, and protocol recursion at 32. Oversized discovery is an error,
 not silently truncated inventory. Input commands are capped at 8192 bytes.
 
+## Switch configuration presets
+
+Press **p** to select and review a local preset load, then **y** to replace staged
+state only. Press **a** separately to review application. Both reviews support
+**n/Esc** cancellation. See [switch-presets.md](switch-presets.md) for the complete
+Seastone 2 recipe, verified port mapping, ARP/NDP backend prerequisites, static
+ERSPAN collector, safe apply behavior, and hardware-verification limitations.
+
 ## Interactive operation
 
 ```sh
@@ -101,13 +109,15 @@ not silently truncated inventory. Input commands are capped at 8192 bytes.
 | `Enter` / `g` | Fetch selected resource using an actual `tui_get` |
 | `r` | Discover/refresh/reconnect using `tui_snapshot`; complete JSON and warnings in details |
 | `w` | Show full discovery warnings; short status area can wrap/truncate long warnings |
+| `p` | Select/review loading a switch preset into local staged state only |
+| `a` | Separately review applying the staged preset; no mutation until confirmed |
 | `:` | Enter a command; field-specific help appears in the details pane |
 | `c` | Draft `create KIND`; adjust the kind and supply required fields |
 | `e` | Draft `set KIND KEY` for the selection |
 | `d` | Review removal of the selected object (not immediate removal) |
 | `?` | Field help for the selection (or all kinds if no selection) |
 | `PageUp` / `PageDown` | Scroll details, field help, or the complete mutation review |
-| `y` | **Only in the review screen**, approve sending the displayed mutation once |
+| `y` | **Only in review**, confirm the labelled action: local load, single mutation, or separate preset application |
 | `n` / `Esc` in review | Cancel without sending any mutation |
 | `Esc` while typing | Discard input |
 | `l` | Clear details/audit view; resume live counters on the Counters page |
@@ -145,6 +155,9 @@ help [KIND]
 Use shell quoting around the entire `--command` argument. Inside a command,
 shell-style quoting is accepted for individual words, but there is no shell
 execution, expansion, semicolon command chaining, or implicit multi-step batch.
+The separately reviewed interactive preset workflow is an explicit multi-step
+operation; `:presets`, `:preset load ID`, `:preset show`, and `:preset apply` are
+local TUI workflow commands, not single-operation headless commands.
 Duplicate/unknown fields, malformed keys/references, invalid booleans/enums,
 out-of-range numbers, malformed MACs and IPv4/IPv6 addresses/CIDRs are rejected
 locally. OIDs accept decimal or `0x` hex and are normalized to hex; nonzero OIDs
@@ -170,7 +183,9 @@ field help in either frontend. `get` can show additional read-only attributes.
 
 | Kind | Create fields | Set fields / restrictions |
 | --- | --- | --- |
-| `port` | Existing only; no create/remove | `admin` bool, `pvid` 1..4094, `ingress_acl`/`egress_acl` table/group OID or `0x0` |
+| `port` | Existing only; no create/remove | `admin`, `pvid`, `speed` Mbps, `ingress_acl`/`egress_acl` table/group OID or `0x0`, `egress_mirror_sessions` comma-separated OIDs (empty detaches) |
+| `mirror_session` | Required `monitor_port`, IPv4 `src_ip`/`dst_ip`, `src_mac`/`dst_mac`, `ttl`, `tos`; fixed enhanced-remote IPv4 L3 GRE profile | Same fields writable; real getter required |
+| `interface_address` | Required `router_interface`, `ingress_port`, host-preserving `address` CIDR; opt-in operational ARP/NDP service | Immutable; key `RIF@HOST/PREFIX`; software-service observations, not ASIC IP-address getters |
 | `vlan` | Required `vlan_id` 1..4094 | No writable fields; read `members` |
 | `bridge_port` | Required `port`; optional `bridge`, `admin` (default true), `learning` hardware/disable | `admin`, `learning` |
 | `vlan_member` | Required VLAN **OID** `vlan`, `bridge_port`, `tagging` tagged/untagged | `tagging` |
@@ -179,8 +194,8 @@ field help in either frontend. `get` can show additional read-only attributes.
 | `next_hop` | Required `router_interface`, IPv4/IPv6 `ip` | Immutable; replace explicitly |
 | `neighbor` | Required `router_interface`, IPv4/IPv6 `ip`, `mac` | `mac` |
 | `route` | Required `virtual_router`, IPv4/IPv6 CIDR `prefix`, `next_hop`; optional `action` forward/drop | `next_hop`, `action` |
-| `acl_table` | Required `stage` ingress/egress, `family` ipv4/ipv6 | Immutable; port bind-point, IP/protocol matching |
-| `acl_entry` | Required `table`, `priority` u32, `action` permit/deny; optional `src`/`dst` CIDRs, `protocol` 0..255, `enable` bool | `priority`, `action`, `enable`, capability-dependent `src`, `dst`, `protocol` |
+| `acl_table` | Required `stage` ingress/egress, `family` ipv4/ipv6/mac; optional `src_mac_enabled`, `l4_dst_port_enabled` | Immutable; port bind-point, bounded IP/protocol/MAC/TCP matching |
+| `acl_entry` | Required `table`, `priority` u32, `action` permit/deny; optional `src`/`dst`, `protocol`, `enable`, exact `src_mac`, `l4_dst_port` (TCP protocol=6) | Non-table fields writable, subject to table enablement and hardware support |
 | `acl_group` | Required `stage` ingress/egress | Immutable; port bind-point parallel group |
 | `acl_group_member` | Required `group`, `table`, `priority` u32 | Immutable; replace explicitly |
 | `fdb` | Read-only | Inspect bridge-port/MAC/VLAN/type; no write support |
@@ -229,8 +244,9 @@ rollback, transaction, automatic cleanup, or automatic mutation retry.
 
 ## Explicit workflows
 
-Each line below is a separate review/approval and readback. No convenience
-workflow silently bundles mutations. Use actual returned/discovered keys in
+Each raw command below is a separate review/approval and readback. The explicit
+preset application workflow instead reviews the whole ordered plan, with a
+separate confirmation and per-step readbacks. No workflow silently bundles mutations. Use actual returned/discovered keys in
 place of the labels (and add `--command '...' --yes` for headless use).
 
 ### Access and trunk VLANs
@@ -278,7 +294,10 @@ set route VR_OID@2001:db8:1::/64 action=drop
 ```
 
 A port RIF uses `port=PORT_OID` **instead of** `vlan`. SAI does **not** assign
-interface IP addresses and this UI does not add Linux IP aliases. RIF + neighbor
+interface IP addresses and this UI does not add Linux IP aliases. The separate
+opt-in `interface_address` responder used by presets provides local ARP/NDP
+replies without Linux aliases; it is not a full dynamic routing control plane.
+The following raw RIF workflow alone does not enable it. RIF + neighbor
 + next-hop + route expresses ASIC forwarding. The UI does not itself configure
 connected/local routes, CPU termination, ARP/NDP response, host OS addresses, or
 packet generation. However, SAI can automatically install a neighbor **host
@@ -357,10 +376,13 @@ counter epoch); long gaps/decreases are detected, but do not infer more.
 ## Deliberate limits
 
 Only the bounded contract kinds/attributes above are managed. There is no FDB
-CRUD, port creation/deletion, speed/lane/breakout configuration, Linux IP
+CRUD, port creation/deletion, lane/breakout configuration, Linux IP
 configuration, switch-wide configuration, counter clearing, ACL counters,
 non-IP next-hop types, arbitrary ACL fields/actions/bind-points, NAT, LAGs,
-transactions, persistence, deployment, or lab traffic tooling. Additional
+transactions, persistence, deployment, or lab traffic tooling. Port speed,
+explicit ERSPAN mirroring, bounded MAC/TCP ACL matches and an opt-in static
+ARP/NDP responder are supported by the preset extensions; SDK support is still
+required. Preset application is an ordered nontransactional sequence, not rollback. Additional
 read-only attributes from the server are shown without inventing support for
 writing them. Server inventory and capability warnings are preserved. Real
 hardware behavior must be verified independently of local wire/mock tests.
