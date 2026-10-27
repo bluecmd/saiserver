@@ -14,6 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+include "sai_tui.thrift"
+
 namespace py switch_sai
 namespace cpp switch_sai
 
@@ -218,7 +220,7 @@ struct sai_thrift_result_t {
     2: sai_thrift_status_t status;
 }
 
-service switch_sai_rpc {
+service switch_sai_rpc extends sai_tui.SaiTui {
     //port API
     sai_thrift_status_t sai_thrift_set_port_attribute(1: sai_thrift_object_id_t port_id, 2: sai_thrift_attribute_t thrift_attr);
     sai_thrift_attribute_list_t sai_thrift_get_port_attribute(1: sai_thrift_object_id_t port_id);
