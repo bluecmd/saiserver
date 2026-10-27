@@ -326,11 +326,27 @@ int main(int argc, char* argv[]) {
   attr[0].id = SAI_SWITCH_ATTR_INIT_SWITCH;
   attr[0].value.booldata = true;
 
-  // Use a locally administered unicast router MAC (0x11 is multicast).
+  // Broadcom SAI requires a source MAC when initializing. Use the tested
+  // locally administered unicast default (the historical 0x11 is multicast),
+  // while allowing deployments to choose their own address via SAI_SRC_MAC.
   sai_mac_t mac = {0x02, 0x00, 0x00, 0x00, 0x04, 0x01};
+  const char* src_mac_env = getenv("SAI_SRC_MAC");
+  if (src_mac_env != nullptr && src_mac_env[0] != '\0') {
+    unsigned int b[6];
+    char tail = 0;
+    if (sscanf(src_mac_env, "%2x:%2x:%2x:%2x:%2x:%2x%c",
+               &b[0], &b[1], &b[2], &b[3], &b[4], &b[5], &tail) != 6) {
+      fprintf(stderr, "SAI_SRC_MAC must be six colon-separated hex bytes, got %s\n",
+              src_mac_env);
+      exit(EXIT_FAILURE);
+    }
+    for (int i = 0; i < 6; i++) {
+      mac[i] = static_cast<unsigned char>(b[i]);
+    }
+  }
+  printf("Switch source MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
+         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-  // NOTE: Seems like Broadcom SAI at least requires the MAC to be set
-  // when init'ing or it will return SAI_STATUS_FAILURE.
   attr[1].id = SAI_SWITCH_ATTR_SRC_MAC_ADDRESS;
   memcpy(attr[1].value.mac, mac, sizeof(mac));
 
