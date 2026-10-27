@@ -1,0 +1,72 @@
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+package(default_visibility = ["//visibility:public"])
+
+cc_test(
+    name = "server_test",
+    srcs = ["server/tui_rpc_test.cpp"],
+    deps = ["//src:tui_rpc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-UNDEBUG"],
+)
+
+cc_test(
+    name = "fdb_events_test",
+    srcs = ["test_fdb_events.cpp"],
+    deps = ["//src:fdb_test_support"],
+    copts = ["-std=c++17", "-UNDEBUG"],
+)
+
+cc_binary(
+    name = "fake_sai.so",
+    testonly = True,
+    srcs = ["fake_sai.cpp"],
+    deps = ["//:sai_headers"],
+    linkshared = True,
+    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
+)
+
+cc_binary(
+    name = "incomplete_fake_sai.so",
+    testonly = True,
+    srcs = ["fake_sai.cpp"],
+    deps = ["//:sai_headers"],
+    linkshared = True,
+    local_defines = ["FAKE_SAI_OMIT_LOG_SET"],
+    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
+)
+
+cc_test(
+    name = "sai_dynamic_test",
+    srcs = ["test_sai_dynamic.cpp"],
+    deps = ["//src:sai_dynamic"],
+    data = [":fake_sai.so", ":incomplete_fake_sai.so"],
+    args = ["$(rootpath :fake_sai.so)", "$(rootpath :incomplete_fake_sai.so)"],
+    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
+)
+
+cc_test(
+    name = "generated_bindings_test",
+    srcs = ["test_generated_bindings.cpp"],
+    data = ["//src:sai_tui_rs", "//tui:src/sai_tui.rs"],
+    args = ["$(rootpath //src:sai_tui_rs)", "$(rootpath //tui:src/sai_tui.rs)"],
+)
+
+sh_test(
+    name = "bazelw_test",
+    srcs = ["test_bazelw.sh"],
+    data = ["//:bazelw"],
+    args = ["$(rootpath //:bazelw)"],
+)
+
+test_suite(
+    name = "tests",
+    tests = [
+        ":server_test",
+        ":fdb_events_test",
+        ":sai_dynamic_test",
+        ":generated_bindings_test",
+        ":bazelw_test",
+    ],
+)

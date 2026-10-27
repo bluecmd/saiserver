@@ -1,0 +1,105 @@
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("//bazel:thrift.bzl", "thrift_codegen")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["sai_tui.thrift", "switch_sai.thrift"])
+
+filegroup(
+    name = "thrift_idl",
+    srcs = ["sai_tui.thrift", "switch_sai.thrift"],
+)
+
+thrift_codegen(
+    name = "cpp_generated",
+    src = "switch_sai.thrift",
+    includes = ["sai_tui.thrift"],
+    language = "cpp:no_skeleton",
+    recursive = True,
+    outs = [
+        "generated/SaiTui.cpp",
+        "generated/SaiTui.h",
+        "generated/sai_tui_types.cpp",
+        "generated/sai_tui_types.h",
+        "generated/switch_sai_rpc.cpp",
+        "generated/switch_sai_rpc.h",
+        "generated/switch_sai_types.cpp",
+        "generated/switch_sai_types.h",
+    ],
+)
+
+thrift_codegen(
+    name = "sai_tui_rs",
+    src = "sai_tui.thrift",
+    language = "rs",
+    outs = ["generated-rs/sai_tui.rs"],
+)
+
+cc_library(
+    name = "thrift_cpp",
+    srcs = [
+        "generated/SaiTui.cpp",
+        "generated/sai_tui_types.cpp",
+        "generated/switch_sai_rpc.cpp",
+        "generated/switch_sai_types.cpp",
+    ],
+    hdrs = [
+        "generated/SaiTui.h",
+        "generated/sai_tui_types.h",
+        "generated/switch_sai_rpc.h",
+        "generated/switch_sai_types.h",
+    ],
+    strip_include_prefix = "generated",
+    deps = ["@saiserver_thrift//:runtime"],
+)
+
+cc_library(
+    name = "tui_rpc",
+    srcs = ["tui_rpc.cpp"],
+    hdrs = ["tui_rpc.h"],
+    strip_include_prefix = ".",
+    deps = [":thrift_cpp", "@saiserver_sai//:headers"],
+    copts = ["-std=c++17"],
+    linkopts = ["-pthread"],
+)
+
+cc_library(
+    name = "server_lib",
+    srcs = ["switch_sai_rpc_server.cpp"],
+    hdrs = ["switch_sai_rpc_server.h"],
+    strip_include_prefix = ".",
+    deps = [":tui_rpc"],
+    # The legacy handler predates override annotations; retain other warnings.
+    copts = ["-std=c++17", "-Wno-inconsistent-missing-override"],
+)
+
+# The implementation is chosen explicitly at deployment, never via host -lsai.
+cc_library(
+    name = "sai_dynamic",
+    srcs = ["sai_dynamic.cpp"],
+    deps = ["@saiserver_sai//:headers"],
+    copts = ["-std=c++17"],
+    linkopts = ["-ldl", "-pthread"],
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+cc_binary(
+    name = "saiserver",
+    srcs = ["saiserver.cpp"],
+    deps = [":server_lib", ":sai_dynamic"],
+    copts = ["-std=c++17"],
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+# Test-only variant keeps the real notification code while discarding the
+# unused server main, exactly as the existing regression's build does.
+cc_library(
+    name = "fdb_test_support",
+    testonly = True,
+    srcs = ["saiserver.cpp", "switch_sai_rpc_server.h"],
+    deps = [":thrift_cpp", "@saiserver_sai//:headers"],
+    copts = ["-std=c++17", "-ffunction-sections", "-fdata-sections"],
+    local_defines = ["main=saiserver_unused_main"],
+    linkopts = ["-Wl,--gc-sections", "-pthread"],
+)
