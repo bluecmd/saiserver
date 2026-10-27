@@ -18,6 +18,9 @@
 #include <cstdint>
 #include <cstring>
 #include <ctime>
+#include <mutex>
+#include <set>
+#include <algorithm>
 
 #include <iostream>
 #include <sstream>
@@ -78,6 +81,7 @@ using std::shared_ptr;
 using namespace ::switch_sai;
 
 extern sai_object_id_t gSwitchId;
+extern std::mutex gFdbMutex;
 
 typedef std::vector<sai_thrift_attribute_t> std_sai_thrift_attr_vctr_t;
 
@@ -90,6 +94,31 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
 
     void tui_snapshot(sai_tui::Inventory& out) override {
       tui_rpc::snapshot(out, gSwitchId);
+      std::vector<std::pair<sai_fdb_entry_t, sai_object_id_t>> notifications;
+      {
+        std::lock_guard<std::mutex> lock(gFdbMutex);
+        notifications = gFdbMap;
+      }
+      // Notifications provide keys, not authoritative attributes. Do not hold
+      // the callback mutex across hardware getters (which may trigger events).
+      std::set<std::string> seen;
+      for (auto& item : notifications) {
+        std::ostringstream key;
+        key << "0x" << std::hex << item.first.bv_id << '@'
+            << mac_to_sai_thrift_string(item.first.mac_address);
+        if (!seen.insert(key.str()).second) continue;
+        try {
+          sai_tui::Object observed;
+          tui_rpc::get(observed, gSwitchId, "fdb", key.str());
+          out.objects.push_back(observed);
+        } catch (const sai_tui::RpcError& e) {
+          if (e.status != SAI_STATUS_ITEM_NOT_FOUND)
+            out.warnings.push_back("FDB getter " + key.str() + " failed: " + e.message);
+        }
+      }
+      out.warnings.erase(std::remove_if(out.warnings.begin(), out.warnings.end(),
+          [](const std::string& w) { return w.find("FDB enumeration is unavailable") == 0; }), out.warnings.end());
+      out.warnings.push_back("FDB view: notification-derived keys, attributes verified with actual SAI getters; not an exhaustive ASIC inventory.");
     }
     void tui_get(sai_tui::Object& out, const std::string& kind, const std::string& key) override {
       tui_rpc::get(out, gSwitchId, kind, key);
@@ -779,6 +808,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
     }
     //listing all the fdb entries from map
     void sai_thrift_get_fdb_entries (sai_thrift_attribute_list_t& thrift_attr_list) {
+      std::lock_guard<std::mutex> lock(gFdbMutex);
       thrift_attr_list.attr_count = gFdbMap.size();
 
       sai_fdb_entry_t fdb_m;

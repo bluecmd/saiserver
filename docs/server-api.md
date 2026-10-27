@@ -2,8 +2,9 @@
 
 The `SaiTui` service in `src/sai_tui.thrift` is inherited by the legacy
 `switch_sai_rpc` service. Both use the existing binary/buffered Thrift endpoint
-(default TCP 9090). The wire contract is [tui-api.md](tui-api.md). No original
-IDLs or Rust code are changed by this server implementation.
+(default TCP 9090). The wire contract is [tui-api.md](tui-api.md). Existing
+legacy method signatures remain available; the bounded methods come from the
+small inherited IDL.
 
 **No authentication or authorization is added. Use localhost/an SSH tunnel on
 an isolated lab.** This is an explicit management API, not a reconciliation
@@ -21,9 +22,11 @@ parsers or uses its notification-derived state as getter readback.
   for process-local enumeration, then performs actual SAI getter readback.
 - `tui_set(kind, key, attributes)` validates **all** requested syntax/field names
   before writing, sets attributes individually, then performs getter readback.
-- `tui_remove(kind, key)` removes once and probes a SAI attribute getter for
-  absence. `ITEM_NOT_FOUND` or `INVALID_OBJECT_ID` confirms absence. A different
-  failure is reported as an unconfirmed successful removal, not silently treated
+- `tui_remove(kind, key)` removes once and reads the full SAI observation for
+  absence, not just an immutable identity field. `ITEM_NOT_FOUND` confirms
+  absence; `INVALID_OBJECT_ID` is accepted only for standalone-OID kinds, never
+  composite neighbor/route keys where it can indicate an invalid parent. Another
+  failure is reported as an unconfirmed acknowledged removal, not silently treated
   as proof of absence. The enumeration hint is discarded only after confirmation.
 - `tui_port_counters(key)` samples supported counters without clearing them.
 
@@ -38,7 +41,8 @@ their error statuses are not replaced with guessed successes.
 There is **no requested-attribute readback cache**. Successful create/set replies
 contain observations from real getters (including SAI defaults), not echoed
 request values. Entry identity fields come from the canonical SAI entry key,
-whose existence is established by the attribute getters. Failed readback after
+whose SDK observation comes from the attribute getters. Some SDK identity
+getters remain readable after deletion: see the explicit limitations below. Failed readback after
 a successful mutation raises the original getter status with **`READBACK FAILED`
 (mutation not rolled back)** and the resource kind/key. The created key remains
 in the enumeration registry even if readback failed. A set failure reports the
@@ -96,7 +100,7 @@ read-only. All supplied immutable fields on set are rejected, even if unchanged.
 | `route` | `virtual_router`, `prefix`, `next_hop` | `action` (forward) | `next_hop`, `action` | canonical key identity fields |
 | `acl_table` | `stage`, `family` | — | none | `src_enabled`, `dst_enabled`, `protocol_enabled` |
 | `acl_entry` | `table`, `priority`, `action` | `src`, `dst`, `protocol`, `enable` (true) | `priority`, `action`, `enable`, `src`, `dst`, `protocol` | only enabled match fields are returned |
-| `acl_group` | `stage` | — | none | `type` (parallel) |
+| `acl_group` | `stage` | — | none | `type` (parallel), `members` |
 | `acl_group_member` | `group`, `table`, `priority` | — | none | — |
 
 ### VLAN/bridge/port
@@ -155,6 +159,44 @@ OID on hardware permitting direct table binding); detach with `0x0`. Unsupported
 hardware combinations and capabilities return their SAI status. Binding is a
 separate explicit port set; no group creation or port binding happens implicitly.
 
+## Observed SDK limitations and conservative verification
+
+The live Broadcom SAI 1.18.1 results are in [lab-verification.md](lab-verification.md).
+These are hardware/version limitations, not simulated or cached successes:
+
+- Port ingress/egress ACL getters return indexed `ATTR_NOT_IMPLEMENTED`
+  (`-196608`). Ports remain discoverable, with `unavailable.ingress_acl` /
+  `unavailable.egress_acl` containing the original status and corresponding
+  inventory warnings. No binding value is fabricated. A successful binding
+  write therefore **still fails overall client verification**. External
+  deny/unbind/rebind/permit probes independently verify the write's effect.
+- PORT bridge-port observations validate the actual default bridge `PORT_LIST`;
+  ACL group-member observations validate the actual group `MEMBER_LIST`.
+  Those authoritative parent lists resolve SDK identity getters that otherwise
+  decode removed members from their OIDs. Parent-list failures are not hidden.
+- Full observations avoid falsely treating one stale immutable field as proof
+  of presence. Nevertheless, this SDK can still return stale identity/default
+  values for removed empty VLANs, RIFs and ACL groups; a removed next hop can
+  return `INVALID_PARAMETER` (`-5`) rather than an absence status. Such removal
+  results remain **unverified failures / possible partial effects**, not claimed
+  successful absence. Arbitrary `-5` or other errors never establish absence.
+  Enumeration hints are retained when absence cannot be confirmed, so SDK-stale
+  objects/warnings may remain visible. Neither a getter's success nor omission
+  from a nonexhaustive snapshot is a general hardware-existence oracle.
+- In-place VLAN-member tagging changes return `NOT_SUPPORTED` (`-15`) on this
+  SDK. The operator can inspect the unchanged getter, then separately confirm
+  removal and creation with the replacement tagging. No automatic fallback or
+  retry is performed. This explicit replacement was traffic-tested.
+- Generic `sai_get_object_count` returned `NOT_SUPPORTED` (`-15`); no exhaustive
+  object inventory is claimed. Do not infer production persistence from the
+  process-local key registry.
+
+SAI may automatically create host routes when neighbors are created. On this
+ASIC such host entries take precedence over an explicit LPM route to the same
+neighbor address. Test explicit routes with a **remote prefix behind the next
+hop**, not just traffic addressed to that neighbor. Remote IPv4/IPv6 route
+forward/drop/update/removal behavior was independently verified.
+
 ## Discovery and read-only resources
 
 Snapshot walks the actual switch port list, default VLAN, default virtual router,
@@ -174,9 +216,12 @@ Warnings always state that this is **not exhaustive ASIC enumeration** and **not
 persistent**: non-default VLAN/L3/ACL objects from legacy calls, another client,
 or a previous process are not discoverable through the process registry.
 Default 1Q router bridge ports do not expose individual VLAN RIF IDs. Snapshot
-does not fabricate RIFs or infer their OIDs. FDB enumeration is unavailable;
-legacy FDB notifications are deliberately not presented as exhaustive hardware
-inventory. Known-key `tui_get` still works without registration.
+does not fabricate RIFs or infer their OIDs. FDB snapshot keys come from legacy
+notifications copied under the FDB mutex; each object's attributes are then read
+through the actual SAI FDB getter, outside that mutex. Keys are deduplicated,
+aged/missing entries are omitted, other failures become warnings. This remains
+notification-derived, nonexhaustive inventory, not an ASIC FDB dump. Known-key
+`tui_get` still works without registration.
 
 ## Port counter availability
 
@@ -229,5 +274,7 @@ counter subset/unsigned behavior and inherited binary-Thrift dispatch/errors.
 The suite and syntax checks also pass against the locally cached development
 headers from Broadcom `libsaibcm-dev_15.2.1.0.0.0.26.3` (those headers identify
 SAI 1.18.1). These are offline API/stub tests, **not** ASIC compatibility or
-forwarding tests. No lab connection, deployment, or mutation was performed. Full executable linking
-requires the vendor library and is left to the integration environment.
+forwarding tests by themselves. The integrated executable was subsequently
+linked against the exact sw4 vendor library and tested on hardware using C++
+Thrift 0.19 with the Rust 0.25 client; see the separate live verification record.
+Full executable linking requires the vendor library.

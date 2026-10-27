@@ -148,7 +148,8 @@ execution, expansion, semicolon command chaining, or implicit multi-step batch.
 Duplicate/unknown fields, malformed keys/references, invalid booleans/enums,
 out-of-range numbers, malformed MACs and IPv4/IPv6 addresses/CIDRs are rejected
 locally. OIDs accept decimal or `0x` hex and are normalized to hex; nonzero OIDs
-are required except ACL binding `0x0` (detach). Route keys are `VR_OID@CIDR`,
+are required except ACL binding `0x0` (detach) and an explicit null route
+`next_hop=0x0`. Route keys are `VR_OID@CIDR`,
 neighbor keys `RIF_OID@IP`, FDB keys `VLAN_OR_BRIDGE_OID@MAC`. CIDRs are normalized
 to their network (e.g. `192.0.2.129/24` becomes `192.0.2.0/24`).
 
@@ -215,9 +216,12 @@ Mutation output separates `mutation`, independent `readback`, `snapshot`,
 reference warnings, and `attribute_mismatches`. Requested attributes are
 compared to normalized **observed getter** values; missing/unmatched attributes
 are a visible verification failure, not a fabricated successful readback.
-For removal, only a server getter error with SAI `ITEM_NOT_FOUND` (`-7`) verifies
-absence; unrelated errors never do. A post-mutation getter/snapshot failure is
-an overall failure even if the mutation was acknowledged. Errors can have
+For removal, a server getter error with SAI `ITEM_NOT_FOUND` (`-7`) verifies
+absence. After an **acknowledged standalone OID removal**, `INVALID_OBJECT_ID`
+(`-19`) also verifies absence; it is not accepted for composite neighbor/route
+keys, where it can indicate an invalid parent. Unrelated errors never do. A
+post-mutation getter/snapshot failure is an overall failure even if the mutation
+was acknowledged. Errors can have
 **partial effects**: review both readbacks and refresh before deciding what to
 do next. A timed-out OID create can leave an object whose key is not known to
 the client; its output says so and includes the snapshot attempt. There is no
@@ -251,8 +255,11 @@ create vlan_member vlan=VLAN_200_OID bridge_port=BRIDGE_PORT_OID tagging=tagged
 
 Only set PVID if an intended native/untagged VLAN exists. Changing tagging uses
 `set vlan_member MEMBER_OID tagging=tagged` (or `untagged`); it does not
-implicitly change PVID. Delete members before VLANs/bridge ports if required
-by SAI dependencies. Do not remove a default/shared resource without understanding
+implicitly change PVID. The tested Broadcom SDK rejects in-place tagging with
+`NOT_SUPPORTED`: inspect the unchanged getter, then explicitly remove the member
+and create its replacement with the desired tagging, reviewing each operation.
+Both tagging modes and this replacement workflow were traffic-tested. Delete
+members before VLANs/bridge ports if required by SAI dependencies. Do not remove a default/shared resource without understanding
 its consumers.
 
 ### IPv4 and IPv6 forwarding
@@ -272,9 +279,11 @@ set route VR_OID@2001:db8:1::/64 action=drop
 
 A port RIF uses `port=PORT_OID` **instead of** `vlan`. SAI does **not** assign
 interface IP addresses and this UI does not add Linux IP aliases. RIF + neighbor
-+ next-hop + route expresses ASIC forwarding. Connected/local routes, CPU
-termination, ARP/NDP response, host OS addresses, and packet generation are not
-implicitly configured. Reverse paths and correct VLAN/port setup are separate
++ next-hop + route expresses ASIC forwarding. The UI does not itself configure
+connected/local routes, CPU termination, ARP/NDP response, host OS addresses, or
+packet generation. However, SAI can automatically install a neighbor **host
+route**, which may take precedence over an explicit LPM route to that same IP.
+Use a remote prefix behind the next hop to test explicit route changes. Reverse paths and correct VLAN/port setup are separate
 requirements. Remove routes before next hops/neighbors/RIFs/VRs as dependencies
 require; every removal still requires confirmation.
 
@@ -300,6 +309,22 @@ updates, resource limits, and action combinations may be unsupported on a
 particular ASIC. These errors are not swallowed or translated into success.
 Detach bindings and remove dependent entries/group members before deleting
 shared tables/groups, where required.
+
+### Live Broadcom readback limitations
+
+The tested SAI 1.18.1 SDK accepts ACL binding writes but does not implement the
+corresponding port getters (`-196608`). The client preserves
+`unavailable.ingress_acl` / `unavailable.egress_acl` and displays a verification
+failure, **not** a made-up binding. External traffic separately confirmed
+IPv4/IPv6 deny, unbind with the deny entry still present, rebind, and permit.
+
+Some removed VLAN/RIF/ACL-group identities remain readable through this SDK;
+removed next-hop getters may return `-5`. Those deletions are explicitly
+**unverified**, not falsely reported absent. PORT bridge ports and ACL group
+members are additionally checked against actual parent lists to resolve stale
+member getters. Do not blindly retry a failed mutation or interpret a limited
+snapshot as exhaustive existence proof. See [server-api.md](server-api.md) and
+[lab-verification.md](lab-verification.md) for exact results and cleanup.
 
 ## Counters and rate history
 
@@ -338,5 +363,7 @@ non-IP next-hop types, arbitrary ACL fields/actions/bind-points, NAT, LAGs,
 transactions, persistence, deployment, or lab traffic tooling. Additional
 read-only attributes from the server are shown without inventing support for
 writing them. Server inventory and capability warnings are preserved. Real
-hardware behavior must be verified on the parent-managed lab; passing local
-wire/mock tests is not a hardware validation claim.
+hardware behavior must be verified independently of local wire/mock tests.
+The completed [live lab record](lab-verification.md) distinguishes tested
+forwarding effects, getter observations, unsupported verification paths and
+restoration; it does not claim untested features or SDK readbacks succeeded.

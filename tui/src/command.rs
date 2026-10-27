@@ -277,17 +277,17 @@ pub fn fields(kind: &str) -> &'static [Field] {
             ),
             f!(
                 "next_hop",
-                Oid(&["next_hop", "router_interface"], false),
+                Oid(&["next_hop", "router_interface"], true),
                 true,
                 true,
-                "next hop or RIF OID; server validates hardware support"
+                "next hop or RIF OID; 0x0 is an explicit null next hop"
             ),
             f!(
                 "action",
                 Enum(&["forward", "drop"]),
                 false,
                 true,
-                "forward or drop"
+                "forward or drop; automatic neighbor host routes can take precedence"
             ),
         ],
         "acl_table" => &[
@@ -645,7 +645,7 @@ mod tests {
     use super::*;
     #[test]
     fn valid_contract_kinds() {
-        for s in ["set port 1 admin=true pvid=100 ingress_acl=0x0", "create vlan vlan_id=100", "create bridge_port port=1 learning=disable", "create vlan_member vlan=2 bridge_port=3 tagging=untagged", "create virtual_router", "create router_interface virtual_router=1 vlan=2 src_mac=AA:BB:CC:DD:EE:FF mtu=9000 ipv6=true", "create next_hop router_interface=1 ip=2001:db8::1", "create neighbor router_interface=1 ip=192.0.2.1 mac=00:11:22:33:44:55", "create route virtual_router=1 prefix=2001:db8::1/64 next_hop=3", "create acl_table stage=ingress family=ipv6", "create acl_entry table=1 priority=4294967295 action=permit src=2001:db8::/32 protocol=255 enable=true", "create acl_group stage=ingress", "create acl_group_member group=1 table=2 priority=0", "get fdb 1@00:11:22:33:44:55", "get switch 1", "remove neighbor 1@::1", "set route 1@192.0.2.42/24 action=drop"] { assert!(parse(s).is_ok(),"{s}: {:?}",parse(s)); }
+        for s in ["set port 1 admin=true pvid=100 ingress_acl=0x0", "create vlan vlan_id=100", "create bridge_port port=1 learning=disable", "create vlan_member vlan=2 bridge_port=3 tagging=untagged", "create virtual_router", "create router_interface virtual_router=1 vlan=2 src_mac=AA:BB:CC:DD:EE:FF mtu=9000 ipv6=true", "create next_hop router_interface=1 ip=2001:db8::1", "create neighbor router_interface=1 ip=192.0.2.1 mac=00:11:22:33:44:55", "create route virtual_router=1 prefix=2001:db8::1/64 next_hop=3", "set route 1@198.19.202.0/24 next_hop=0x0 action=drop", "create acl_table stage=ingress family=ipv6", "create acl_entry table=1 priority=4294967295 action=permit src=2001:db8::/32 protocol=255 enable=true", "create acl_group stage=ingress", "create acl_group_member group=1 table=2 priority=0", "get fdb 1@00:11:22:33:44:55", "get switch 1", "remove neighbor 1@::1", "set route 1@192.0.2.42/24 action=drop"] { assert!(parse(s).is_ok(),"{s}: {:?}",parse(s)); }
     }
     #[test]
     fn rejects_bad_fields_ranges_references_and_immutable() {

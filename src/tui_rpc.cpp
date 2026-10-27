@@ -280,9 +280,26 @@ std::vector<Field> matchfields(const Family& f) {
 sai_tui::Object observe(uint64_t sw, const std::string& kind, const Key& k) {
     sai_tui::Object out; out.kind = kind; out.key = k.text;
     auto fs = fields(kind);
+    // Some SDK member getters merely decode the OID, even after deletion.
+    // Read the parent's actual MEMBER_LIST before treating the key as live.
+    if (kind == "acl_group_member") {
+        auto group = read(kind, k, SAI_ACL_TABLE_GROUP_MEMBER_ATTR_ACL_TABLE_GROUP_ID).value.oid;
+        auto members = list("acl_group", key(sw, "acl_group", hex(group)), SAI_ACL_TABLE_GROUP_ATTR_MEMBER_LIST);
+        if (std::find(members.begin(), members.end(), k.id) == members.end())
+            fail(SAI_STATUS_ITEM_NOT_FOUND, "ACL group member absent from actual parent MEMBER_LIST");
+    }
     int32_t type = -1;
     if (kind == "router_interface") { type = read(kind, k, SAI_ROUTER_INTERFACE_ATTR_TYPE).value.s32; out.attributes["type"] = std::to_string(type); }
-    if (kind == "bridge_port") { type = read(kind, k, SAI_BRIDGE_PORT_ATTR_TYPE).value.s32; out.attributes["type"] = std::to_string(type); }
+    if (kind == "bridge_port") {
+        type = read(kind, k, SAI_BRIDGE_PORT_ATTR_TYPE).value.s32;
+        out.attributes["type"] = std::to_string(type);
+        if (type == SAI_BRIDGE_PORT_TYPE_PORT) {
+            auto parent = read("switch", key(sw, "switch", hex(sw)), SAI_SWITCH_ATTR_DEFAULT_1Q_BRIDGE_ID).value.oid;
+            auto ports = list("bridge", key(sw, "bridge", hex(parent)), SAI_BRIDGE_ATTR_PORT_LIST);
+            if (std::find(ports.begin(), ports.end(), k.id) == ports.end())
+                fail(SAI_STATUS_ITEM_NOT_FOUND, "bridge port absent from actual parent PORT_LIST");
+        }
+    }
     if (kind == "next_hop") {
         type = read(kind, k, SAI_NEXT_HOP_ATTR_TYPE).value.s32; out.attributes["type"] = std::to_string(type);
         if (type != SAI_NEXT_HOP_TYPE_IP) fail(SAI_STATUS_NOT_SUPPORTED, "only IP next hops are supported");
@@ -292,7 +309,18 @@ sai_tui::Object observe(uint64_t sw, const std::string& kind, const Key& k) {
         if (kind == "router_interface" && ((name == "port" && type != SAI_ROUTER_INTERFACE_TYPE_PORT) || (name == "vlan" && type != SAI_ROUTER_INTERFACE_TYPE_VLAN) || (name == "src_mac" && type == SAI_ROUTER_INTERFACE_TYPE_LOOPBACK))) continue;
         if (kind == "bridge_port" && name == "port" && type != SAI_BRIDGE_PORT_TYPE_PORT && type != SAI_BRIDGE_PORT_TYPE_SUB_PORT) continue;
         if (kind == "bridge_port" && name == "bridge" && (type == SAI_BRIDGE_PORT_TYPE_PORT || type == SAI_BRIDGE_PORT_TYPE_1Q_ROUTER)) continue;
-        out.attributes[name] = decode(f, read(kind, k, f.id));
+        try {
+            out.attributes[name] = decode(f, read(kind, k, f.id));
+        } catch (const sai_tui::RpcError& e) {
+            // Some SDKs implement binding writes but not port ACL getters.
+            // Keep ports visible, but never invent a cached binding value.
+            const bool unsupported = e.status == SAI_STATUS_NOT_SUPPORTED ||
+                e.status == SAI_STATUS_NOT_IMPLEMENTED ||
+                SAI_STATUS_IS_ATTR_NOT_IMPLEMENTED(e.status) ||
+                SAI_STATUS_IS_ATTR_NOT_SUPPORTED(e.status);
+            if (kind != "port" || (name != "ingress_acl" && name != "egress_acl") || !unsupported) throw;
+            out.attributes["unavailable." + name] = "SAI getter unsupported, status " + std::to_string(e.status);
+        }
     }
     if (kind == "neighbor") { out.attributes["router_interface"] = hex(k.neighbor.rif_id); out.attributes["ip"] = iptext(k.neighbor.ip_address); }
     if (kind == "route") { out.attributes["virtual_router"] = hex(k.route.vr_id); out.attributes["prefix"] = prefixtext(k.route.destination); }
@@ -320,7 +348,10 @@ sai_tui::Object observe(uint64_t sw, const std::string& kind, const Key& k) {
         auto f = tablefamily(k); out.attributes["family"] = f.v4 && !f.v6 ? "ipv4" : f.v6 && !f.v4 ? "ipv6" : "mixed-or-unspecified";
         out.attributes["src_enabled"] = boolean(f.src); out.attributes["dst_enabled"] = boolean(f.dst); out.attributes["protocol_enabled"] = boolean(f.protocol);
     }
-    if (kind == "acl_group") out.attributes["type"] = std::to_string(read(kind, k, SAI_ACL_TABLE_GROUP_ATTR_TYPE).value.s32);
+    if (kind == "acl_group") {
+        out.attributes["type"] = std::to_string(read(kind, k, SAI_ACL_TABLE_GROUP_ATTR_TYPE).value.s32);
+        out.attributes["members"] = oidlist(list(kind, k, SAI_ACL_TABLE_GROUP_ATTR_MEMBER_LIST));
+    }
     if (kind == "acl_entry") {
         auto table = key(sw, "acl_table", out.attributes.at("table"));
         for (const auto& f : matchfields(tablefamily(table))) {
@@ -493,18 +524,20 @@ void remove(uint64_t sw, const std::string& kind, const std::string& text) {
     if (kind == "port") fail(SAI_STATUS_NOT_SUPPORTED, "port removal is outside bounded API");
     auto k = key(sw, kind, text);
     check(rawremove(kind, k), "remove " + kind + " " + k.text + " failed; no retry");
-    // An actual getter must confirm absence, not an optimistic registry lookup.
-    sai_attr_id_t probe = fields(kind).front().id;
-    sai_attribute_t a{}; a.id = probe;
-    sai_status_t s;
-    try { s = rawget(kind, k, &a); }
-    catch (const sai_tui::RpcError& e) { fail(e.status, "remove succeeded; absence readback failed for " + kind + " " + k.text + ": " + e.message); }
-    if (s == SAI_STATUS_ITEM_NOT_FOUND || s == SAI_STATUS_INVALID_OBJECT_ID) {
-        managed[sw].erase({kind, k.text});
-        return;
+    // Read the full observation, not just the first immutable field. SDKs
+    // sometimes decode VLAN/group/member identity fields from stale OID bits.
+    try { observe(sw, kind, k); }
+    catch (const sai_tui::RpcError& e) {
+        const bool standalone_oid = kind != "neighbor" && kind != "route" && kind != "fdb";
+        if (e.status == SAI_STATUS_ITEM_NOT_FOUND ||
+            (standalone_oid && e.status == SAI_STATUS_INVALID_OBJECT_ID)) {
+            managed[sw].erase({kind, k.text}); return;
+        }
+        fail(e.status, "remove succeeded; absence could not be confirmed for " + kind + " " + k.text + ": " + e.message);
     }
-    if (s == SAI_STATUS_SUCCESS) fail(SAI_STATUS_FAILURE, "remove returned success but object still readable: " + kind + " " + k.text);
-    fail(s, "remove succeeded; absence could not be confirmed for " + kind + " " + k.text + " (no rollback)");
+    fail(kind == "acl_group" ? SAI_STATUS_NOT_SUPPORTED : SAI_STATUS_FAILURE,
+         "remove returned success but object still readable: " + kind + " " + k.text +
+         "; absence unverified (SDK may decode stale identity fields); no retry or fabricated success");
 }
 void snapshot(sai_tui::Inventory& out, uint64_t sw) {
     std::lock_guard<std::mutex> lock(mutex); out.objects.clear(); out.warnings.clear();
@@ -538,6 +571,11 @@ void snapshot(sai_tui::Inventory& out, uint64_t sw) {
     try { for (auto id : list("switch", sk, SAI_SWITCH_ATTR_PORT_LIST)) add("port", hex(id)); }
     catch (const sai_tui::RpcError& e) { out.warnings.push_back("discover ports failed status " + std::to_string(e.status) + ": " + e.message); }
     for (const auto& item : managed[sw]) add(item.first, item.second);
+    std::set<std::string> capability_warnings;
+    for (const auto& object : out.objects) for (const auto& attr : object.attributes)
+        if (attr.first.find("unavailable.") == 0)
+            capability_warnings.insert(object.kind + "." + attr.first.substr(12) + ": " + attr.second + "; never cached or treated as verified");
+    out.warnings.insert(out.warnings.end(), capability_warnings.begin(), capability_warnings.end());
 }
 void port_counters(std::map<std::string, int64_t>& out, uint64_t, const std::string& text) {
     std::lock_guard<std::mutex> lock(mutex); auto id = oid(text); out.clear();

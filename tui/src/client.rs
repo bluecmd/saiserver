@@ -395,10 +395,18 @@ fn mutate(service: &mut impl Service, cmd: &Command) -> Outcome {
     let readback = target.as_ref().map(|(k, v)| checked_get(service, k, v));
     let snapshot = service.snapshot();
     let removal = matches!(cmd, Command::Remove { .. });
-    // SAI_STATUS_ITEM_NOT_FOUND is -7. Never treat arbitrary getter errors as absence.
+    // After an acknowledged standalone-OID removal, SAI may report
+    // INVALID_OBJECT_ID (-19), rather than ITEM_NOT_FOUND (-7). An invalid
+    // parent OID on a composite key is NOT proof that an entry was removed.
+    let acknowledged_oid_removal = mutation.is_ok()
+        && matches!(cmd, Command::Remove { kind, .. } if !matches!(kind.as_str(), "neighbor" | "route" | "fdb"));
     let verified = match &readback {
         Some(Ok(_)) => !removal,
-        Some(Err(e)) => removal && e.category == "server" && e.status == Some(-7),
+        Some(Err(e)) => {
+            removal
+                && e.category == "server"
+                && (e.status == Some(-7) || (acknowledged_oid_removal && e.status == Some(-19)))
+        }
         None => false,
     };
     let mut mismatches = Vec::new();

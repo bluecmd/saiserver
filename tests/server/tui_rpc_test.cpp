@@ -7,6 +7,7 @@ extern "C" {
 #include <thrift/transport/TBufferTransports.h>
 #include <arpa/inet.h>
 #include <cassert>
+#include <algorithm>
 #include <cstring>
 #include <functional>
 #include <iostream>
@@ -21,6 +22,7 @@ struct Record {
     std::map<sai_attr_id_t, std::vector<sai_object_id_t>> lists;
 };
 std::map<sai_object_id_t, Record> records;
+std::map<sai_object_id_t, Record> deleted;
 std::map<std::string, Record> entries;
 uint64_t nextid = 100;
 unsigned queries = 0, mutations = 0, gets = 0, writes = 0;
@@ -60,7 +62,14 @@ void store(Record& r, uint32_t n, const sai_attribute_t* a) {
 }
 sai_status_t create(const char* kind, sai_object_id_t* id, uint32_t n, const sai_attribute_t* a) {
     ++mutations; if (failcreate) return SAI_STATUS_TABLE_FULL;
-    *id = nextid++; records[*id].kind = kind; store(records[*id], n, a); return SAI_STATUS_SUCCESS;
+    *id = nextid++; records[*id].kind = kind; store(records[*id], n, a);
+    if (std::string(kind) == "bridge_port") records.at(4).lists[SAI_BRIDGE_ATTR_PORT_LIST].push_back(*id);
+    if (std::string(kind) == "acl_group") records[*id].lists[SAI_ACL_TABLE_GROUP_ATTR_MEMBER_LIST] = {};
+    if (std::string(kind) == "acl_group_member") {
+        auto parent = records[*id].values.at(SAI_ACL_TABLE_GROUP_MEMBER_ATTR_ACL_TABLE_GROUP_ID).oid;
+        records.at(parent).lists[SAI_ACL_TABLE_GROUP_ATTR_MEMBER_LIST].push_back(*id);
+    }
+    return SAI_STATUS_SUCCESS;
 }
 sai_status_t read(Record& r, uint32_t n, sai_attribute_t* a) {
     ++gets; assert(n == 1);
@@ -84,7 +93,13 @@ sai_status_t read(Record& r, uint32_t n, sai_attribute_t* a) {
 }
 sai_status_t getoid(sai_object_id_t id, uint32_t n, sai_attribute_t* a) {
     if (forced_get_status != SAI_STATUS_SUCCESS) return forced_get_status;
-    if (!records.count(id)) return SAI_STATUS_ITEM_NOT_FOUND;
+    if (!records.count(id)) {
+        // The identity getter can succeed after deletion; other actual
+        // attributes correctly report absence. A single-field probe is unsafe.
+        if (deleted.count(id) && deleted.at(id).kind == "vlan_member" && a->id == SAI_VLAN_MEMBER_ATTR_VLAN_ID)
+            return read(deleted.at(id), n, a);
+        return SAI_STATUS_ITEM_NOT_FOUND;
+    }
     return read(records.at(id), n, a);
 }
 sai_status_t setoid(sai_object_id_t id, const sai_attribute_t* a) {
@@ -95,7 +110,19 @@ sai_status_t setoid(sai_object_id_t id, const sai_attribute_t* a) {
 }
 sai_status_t removeoid(sai_object_id_t id) {
     ++mutations; if (!records.count(id)) return SAI_STATUS_ITEM_NOT_FOUND;
-    if (!keepremoved) records.erase(id);
+    if (!keepremoved) {
+        if (records.at(id).kind == "acl_group_member") {
+            auto parent = records.at(id).values.at(SAI_ACL_TABLE_GROUP_MEMBER_ATTR_ACL_TABLE_GROUP_ID).oid;
+            auto& members = records.at(parent).lists[SAI_ACL_TABLE_GROUP_ATTR_MEMBER_LIST];
+            members.erase(std::remove(members.begin(), members.end(), id), members.end());
+            // Model the real SDK quirk: its member getter keeps decoding stale
+            // OID attributes after removal; only parent membership is reliable.
+        } else if (records.at(id).kind == "bridge_port") {
+            auto& members = records.at(4).lists[SAI_BRIDGE_ATTR_PORT_LIST];
+            members.erase(std::remove(members.begin(), members.end(), id), members.end());
+            // Retain decodable identity fields to model the real stale getter.
+        } else { deleted[id] = records.at(id); records.erase(id); }
+    }
     return SAI_STATUS_SUCCESS;
 }
 #define CREATOR(NAME) sai_status_t create_##NAME(sai_object_id_t* id, sai_object_id_t sw, uint32_t n, const sai_attribute_t* a) { assert(sw == 1); return create(#NAME, id, n, a); }
@@ -112,8 +139,8 @@ sai_status_t cr(const sai_route_entry_t* e, uint32_t n, const sai_attribute_t* a
     if (entries.count(k)) return SAI_STATUS_ITEM_ALREADY_EXISTS;
     entries[k].kind = "route"; store(entries[k], n, a); return SAI_STATUS_SUCCESS;
 }
-sai_status_t gn(const sai_neighbor_entry_t* e, uint32_t n, sai_attribute_t* a) { return entries.count(nk(e)) ? read(entries.at(nk(e)), n, a) : SAI_STATUS_ITEM_NOT_FOUND; }
-sai_status_t gr(const sai_route_entry_t* e, uint32_t n, sai_attribute_t* a) { return entries.count(rk(e)) ? read(entries.at(rk(e)), n, a) : SAI_STATUS_ITEM_NOT_FOUND; }
+sai_status_t gn(const sai_neighbor_entry_t* e, uint32_t n, sai_attribute_t* a) { if (forced_get_status != SAI_STATUS_SUCCESS) return forced_get_status; return entries.count(nk(e)) ? read(entries.at(nk(e)), n, a) : SAI_STATUS_ITEM_NOT_FOUND; }
+sai_status_t gr(const sai_route_entry_t* e, uint32_t n, sai_attribute_t* a) { if (forced_get_status != SAI_STATUS_SUCCESS) return forced_get_status; return entries.count(rk(e)) ? read(entries.at(rk(e)), n, a) : SAI_STATUS_ITEM_NOT_FOUND; }
 sai_status_t sn(const sai_neighbor_entry_t* e, const sai_attribute_t* a) { ++mutations; if (!entries.count(nk(e))) return SAI_STATUS_ITEM_NOT_FOUND; store(entries.at(nk(e)), 1, a); return SAI_STATUS_SUCCESS; }
 sai_status_t sr(const sai_route_entry_t* e, const sai_attribute_t* a) { ++mutations; if (!entries.count(rk(e))) return SAI_STATUS_ITEM_NOT_FOUND; store(entries.at(rk(e)), 1, a); return SAI_STATUS_SUCCESS; }
 sai_status_t rn(const sai_neighbor_entry_t* e) { ++mutations; return entries.erase(nk(e)) ? SAI_STATUS_SUCCESS : SAI_STATUS_ITEM_NOT_FOUND; }
@@ -294,12 +321,33 @@ void failures() {
     failget = SAI_PORT_ATTR_SPEED;
     error([&] { tui_rpc::set(o, 1, "port", "5", {{"admin", "true"}}); }, SAI_STATUS_NOT_SUPPORTED, "READBACK FAILED");
     failget = UINT32_MAX;
+    failget = SAI_PORT_ATTR_INGRESS_ACL;
+    tui_rpc::get(o, 1, "port", "5");
+    assert(!o.attributes.count("ingress_acl") && o.attributes.count("unavailable.ingress_acl"));
+    assert(o.attributes.count("admin") && o.attributes.count("lanes"));
+    failget = UINT32_MAX;
     // Objects on a table lacking protocol support must not silently ignore protocol.
     auto t = make("acl_table", {{"family", "ipv4"}, {"stage", "egress"}});
     auto tid = std::stoull(t.key, nullptr, 16); records[tid].values[SAI_ACL_TABLE_ATTR_FIELD_IP_PROTOCOL].booldata = false;
     auto before = mutations;
     error([&] { tui_rpc::create(o, 1, "acl_entry", {{"table", t.key}, {"priority", "1"}, {"action", "deny"}, {"protocol", "6"}}); }, SAI_STATUS_NOT_SUPPORTED, "does not support protocol"); assert(mutations == before);
     tui_rpc::remove(1, "acl_table", t.key);
+    // INVALID_OBJECT_ID can mean a missing parent on composite entries. A
+    // successful remove followed by that getter error is NOT confirmed absence.
+    auto route = make("route", {{"virtual_router", "3"}, {"prefix", "198.51.100.0/24"}, {"next_hop", "0"}, {"action", "drop"}});
+    auto neighbor = make("neighbor", {{"router_interface", "9"}, {"ip", "192.0.2.2"}, {"mac", "02:00:00:00:00:02"}});
+    auto saved_entries = entries;
+    forced_get_status = SAI_STATUS_INVALID_OBJECT_ID;
+    error([&] { tui_rpc::remove(1, "route", route.key); }, SAI_STATUS_INVALID_OBJECT_ID, "absence could not be confirmed");
+    error([&] { tui_rpc::remove(1, "neighbor", neighbor.key); }, SAI_STATUS_INVALID_OBJECT_ID, "absence could not be confirmed");
+    forced_get_status = SAI_STATUS_SUCCESS;
+    // Restore the fake backend solely to clean the retained enumeration hints.
+    entries = saved_entries;
+    tui_rpc::remove(1, "route", route.key); tui_rpc::remove(1, "neighbor", neighbor.key);
+    auto standalone = make("vlan", {{"vlan_id", "19"}});
+    forced_get_status = SAI_STATUS_INVALID_OBJECT_ID;
+    tui_rpc::remove(1, "vlan", standalone.key);
+    forced_get_status = SAI_STATUS_SUCCESS;
 }
 void inventory_counters() {
     sai_tui::Inventory inv; tui_rpc::snapshot(inv, 1);

@@ -200,6 +200,40 @@ fn arbitrary_getter_error_or_existing_object_is_not_removal_verification() {
     }
 }
 #[test]
+fn acknowledged_oid_removal_accepts_invalid_object_but_composite_parent_does_not() {
+    for (command, kind, key, expected) in [
+        ("remove vlan 2", "vlan", "0x2", true),
+        (
+            "remove neighbor 1@2001:db8::1",
+            "neighbor",
+            "0x1@2001:db8::1",
+            false,
+        ),
+        (
+            "remove route 1@192.0.2.0/24",
+            "route",
+            "0x1@192.0.2.0/24",
+            false,
+        ),
+    ] {
+        let mut mock = Mock::new(kind, key);
+        mock.getter_error = Some(failure("server", Some(-19)));
+        let cmd = parse(command).unwrap();
+        let result = execute(&mut mock, &cmd, approve(&cmd, true).unwrap());
+        assert_eq!(result.ok, expected);
+        assert_eq!(result.value["removal_verified_absent"], expected);
+        assert_eq!(
+            mock.calls,
+            [
+                "snapshot",
+                "remove",
+                &format!("get {kind} {key}"),
+                "snapshot"
+            ]
+        );
+    }
+}
+#[test]
 fn preflight_failure_and_absent_confirmation_send_no_mutation() {
     let mut mock = Mock::new("port", "0x1");
     let cmd = parse("set port 1 admin=true").unwrap();
