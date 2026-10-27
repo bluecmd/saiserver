@@ -6,3 +6,6 @@ src/obj/**
 
 __pycache__/
 saiserver
+.lab/
+.pi/
+target/
