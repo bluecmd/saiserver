@@ -128,6 +128,7 @@ Ops ops(const std::string& k) {
     Ops o;
 #define OPS(K, API, TYPE, NAME) if (k == K) { auto p = api<TYPE>(API); o.create = p->create_##NAME; o.remove = p->remove_##NAME; o.set = p->set_##NAME##_attribute; o.get = p->get_##NAME##_attribute; return o; }
     OPS("port", SAI_API_PORT, sai_port_api_t, port)
+    OPS("mirror_session", SAI_API_MIRROR, sai_mirror_api_t, mirror_session)
     OPS("vlan", SAI_API_VLAN, sai_vlan_api_t, vlan)
     OPS("vlan_member", SAI_API_VLAN, sai_vlan_api_t, vlan_member)
     OPS("bridge_port", SAI_API_BRIDGE, sai_bridge_api_t, bridge_port)
@@ -144,7 +145,7 @@ Ops ops(const std::string& k) {
     invalid("unsupported kind: " + k);
 }
 void kindcheck(const std::string& k) {
-    static const std::set<std::string> kinds = {"switch", "bridge", "port", "vlan", "bridge_port", "vlan_member", "virtual_router", "router_interface", "next_hop", "neighbor", "route", "acl_table", "acl_entry", "acl_group", "acl_group_member", "fdb"};
+    static const std::set<std::string> kinds = {"switch", "bridge", "port", "vlan", "bridge_port", "vlan_member", "virtual_router", "router_interface", "next_hop", "neighbor", "route", "acl_table", "acl_entry", "acl_group", "acl_group_member", "mirror_session", "fdb"};
     if (!kinds.count(k)) invalid("unsupported kind: " + k);
 }
 sai_status_t rawget(const std::string& kind, const Key& k, sai_attribute_t* a) {
@@ -174,11 +175,34 @@ std::vector<sai_object_id_t> list(const std::string& kind, const Key& k, sai_att
 std::string oidlist(const std::vector<sai_object_id_t>& v) {
     std::string s; for (auto id : v) { if (!s.empty()) s += ','; s += hex(id); } return s;
 }
-enum Type { BOOL, U8, U16, U32, OID, NULL_OID, MAC, IP, STAGE, LEARNING, TAGGING, ROUTE_ACTION, ACL_ACTION, MATCH4, MATCH6, PROTOCOL, INT };
+std::vector<sai_object_id_t> parse_oidlist(const std::string& s) {
+    std::vector<sai_object_id_t> ids; std::set<sai_object_id_t> seen;
+    if (s.empty()) return ids;
+    size_t start = 0;
+    do {
+        auto end = s.find(',', start);
+        auto id = oid(s.substr(start, end == std::string::npos ? end : end - start));
+        if (!seen.insert(id).second) invalid("duplicate OID in list");
+        ids.push_back(id);
+        if (ids.size() > 65536) invalid("OID list exceeds 65536 entries");
+        if (end == std::string::npos) break;
+        start = end + 1;
+    } while (true);
+    return ids;
+}
+enum Type { BOOL, U8, U16, U32, OID, NULL_OID, MAC, IP, IPV4, STAGE, LEARNING, TAGGING, ROUTE_ACTION, ACL_ACTION, MATCH4, MATCH6, MATCH_MAC, L4_PORT, PROTOCOL, INT };
 struct Field { const char* name; sai_attr_id_t id; Type type; bool writable; bool required; };
 std::vector<Field> fields(const std::string& k) {
 #define F(N, ID, T, W, R) {N, ID, T, W, R}
-    if (k == "port") return {F("admin", SAI_PORT_ATTR_ADMIN_STATE, BOOL, true, false), F("pvid", SAI_PORT_ATTR_PORT_VLAN_ID, U16, true, false), F("ingress_acl", SAI_PORT_ATTR_INGRESS_ACL, NULL_OID, true, false), F("egress_acl", SAI_PORT_ATTR_EGRESS_ACL, NULL_OID, true, false), F("speed", SAI_PORT_ATTR_SPEED, U32, false, false), F("oper_status", SAI_PORT_ATTR_OPER_STATUS, INT, false, false)};
+    if (k == "port") return {F("admin", SAI_PORT_ATTR_ADMIN_STATE, BOOL, true, false), F("pvid", SAI_PORT_ATTR_PORT_VLAN_ID, U16, true, false), F("ingress_acl", SAI_PORT_ATTR_INGRESS_ACL, NULL_OID, true, false), F("egress_acl", SAI_PORT_ATTR_EGRESS_ACL, NULL_OID, true, false), F("speed", SAI_PORT_ATTR_SPEED, U32, true, false), F("oper_status", SAI_PORT_ATTR_OPER_STATUS, INT, false, false)};
+    if (k == "mirror_session") return {
+        F("monitor_port", SAI_MIRROR_SESSION_ATTR_MONITOR_PORT, OID, true, true),
+        F("src_ip", SAI_MIRROR_SESSION_ATTR_SRC_IP_ADDRESS, IPV4, true, true),
+        F("dst_ip", SAI_MIRROR_SESSION_ATTR_DST_IP_ADDRESS, IPV4, true, true),
+        F("src_mac", SAI_MIRROR_SESSION_ATTR_SRC_MAC_ADDRESS, MAC, true, true),
+        F("dst_mac", SAI_MIRROR_SESSION_ATTR_DST_MAC_ADDRESS, MAC, true, true),
+        F("ttl", SAI_MIRROR_SESSION_ATTR_TTL, U8, true, true),
+        F("tos", SAI_MIRROR_SESSION_ATTR_TOS, U8, true, true)};
     if (k == "vlan") return {F("vlan_id", SAI_VLAN_ATTR_VLAN_ID, U16, false, true)};
     if (k == "bridge_port") return {F("port", SAI_BRIDGE_PORT_ATTR_PORT_ID, OID, false, true), F("bridge", SAI_BRIDGE_PORT_ATTR_BRIDGE_ID, OID, false, false), F("admin", SAI_BRIDGE_PORT_ATTR_ADMIN_STATE, BOOL, true, false), F("learning", SAI_BRIDGE_PORT_ATTR_FDB_LEARNING_MODE, LEARNING, true, false)};
     if (k == "vlan_member") return {F("vlan", SAI_VLAN_MEMBER_ATTR_VLAN_ID, OID, false, true), F("bridge_port", SAI_VLAN_MEMBER_ATTR_BRIDGE_PORT_ID, OID, false, true), F("tagging", SAI_VLAN_MEMBER_ATTR_VLAN_TAGGING_MODE, TAGGING, true, true)};
@@ -187,7 +211,7 @@ std::vector<Field> fields(const std::string& k) {
     if (k == "next_hop") return {F("router_interface", SAI_NEXT_HOP_ATTR_ROUTER_INTERFACE_ID, OID, false, true), F("ip", SAI_NEXT_HOP_ATTR_IP, IP, false, true)};
     if (k == "neighbor") return {F("mac", SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS, MAC, true, true)};
     if (k == "route") return {F("next_hop", SAI_ROUTE_ENTRY_ATTR_NEXT_HOP_ID, NULL_OID, true, true), F("action", SAI_ROUTE_ENTRY_ATTR_PACKET_ACTION, ROUTE_ACTION, true, false)};
-    if (k == "acl_table") return {F("stage", SAI_ACL_TABLE_ATTR_ACL_STAGE, STAGE, false, true)};
+    if (k == "acl_table") return {F("stage", SAI_ACL_TABLE_ATTR_ACL_STAGE, STAGE, false, true), F("src_mac_enabled", SAI_ACL_TABLE_ATTR_FIELD_SRC_MAC, BOOL, false, false), F("l4_dst_port_enabled", SAI_ACL_TABLE_ATTR_FIELD_L4_DST_PORT, BOOL, false, false)};
     if (k == "acl_entry") return {F("table", SAI_ACL_ENTRY_ATTR_TABLE_ID, OID, false, true), F("priority", SAI_ACL_ENTRY_ATTR_PRIORITY, U32, true, true), F("enable", SAI_ACL_ENTRY_ATTR_ADMIN_STATE, BOOL, true, false), F("action", SAI_ACL_ENTRY_ATTR_ACTION_PACKET_ACTION, ACL_ACTION, true, true)};
     if (k == "acl_group") return {F("stage", SAI_ACL_TABLE_GROUP_ATTR_ACL_STAGE, STAGE, false, true)};
     if (k == "acl_group_member") return {F("group", SAI_ACL_TABLE_GROUP_MEMBER_ATTR_ACL_TABLE_GROUP_ID, OID, false, true), F("table", SAI_ACL_TABLE_GROUP_MEMBER_ATTR_ACL_TABLE_ID, OID, false, true), F("priority", SAI_ACL_TABLE_GROUP_MEMBER_ATTR_PRIORITY, U32, false, true)};
@@ -207,10 +231,13 @@ sai_attribute_t encode(const Field& f, const std::string& s) {
     case BOOL: a.value.booldata = boolean(s); break;
     case U8: a.value.u8 = number(s, 255); break;
     case U16: a.value.u16 = number(s, 4094); if (!a.value.u16) invalid("VLAN ID/PVID must be 1..4094"); break;
-    case U32: a.value.u32 = number(s, UINT32_MAX); if (std::string(f.name) == "mtu" && !a.value.u32) invalid("MTU must be positive"); break;
+    case U32: a.value.u32 = number(s, UINT32_MAX); if ((std::string(f.name) == "mtu" || std::string(f.name) == "speed") && !a.value.u32) invalid("MTU/speed must be positive"); break;
     case OID: case NULL_OID: a.value.oid = oid(s, f.type == NULL_OID); break;
     case MAC: mac(s, a.value.mac); break;
-    case IP: a.value.ipaddr = ip(s); break;
+    case IP: case IPV4:
+        a.value.ipaddr = ip(s);
+        if (f.type == IPV4 && a.value.ipaddr.addr_family != SAI_IP_ADDR_FAMILY_IPV4) invalid("mirror session requires IPv4");
+        break;
     case STAGE: a.value.s32 = choice(s, "ingress", SAI_ACL_STAGE_INGRESS, "egress", SAI_ACL_STAGE_EGRESS); break;
     case LEARNING: a.value.s32 = choice(s, "hardware", SAI_BRIDGE_PORT_FDB_LEARNING_MODE_HW, "disable", SAI_BRIDGE_PORT_FDB_LEARNING_MODE_DISABLE); break;
     case TAGGING: a.value.s32 = choice(s, "tagged", SAI_VLAN_TAGGING_MODE_TAGGED, "untagged", SAI_VLAN_TAGGING_MODE_UNTAGGED); break;
@@ -223,6 +250,12 @@ sai_attribute_t encode(const Field& f, const std::string& s) {
         else { std::memcpy(a.value.aclfield.data.ip6, p.addr.ip6, 16); std::memcpy(a.value.aclfield.mask.ip6, p.mask.ip6, 16); }
         break;
     }
+    case MATCH_MAC:
+        a.value.aclfield.enable = true; mac(s, a.value.aclfield.data.mac);
+        std::memset(a.value.aclfield.mask.mac, 255, 6); break;
+    case L4_PORT:
+        a.value.aclfield.enable = true; a.value.aclfield.data.u16 = number(s, 65535);
+        a.value.aclfield.mask.u16 = 65535; break;
     case PROTOCOL: a.value.aclfield.enable = true; a.value.aclfield.data.u8 = number(s, 255); a.value.aclfield.mask.u8 = 255; break;
     default: invalid("read-only attribute: " + std::string(f.name));
     }
@@ -236,6 +269,9 @@ std::string decode(const Field& f, const sai_attribute_t& a) {
     case U32: return std::to_string(a.value.u32);
     case OID: case NULL_OID: return hex(a.value.oid);
     case MAC: return mactext(a.value.mac);
+    case IPV4:
+        if (a.value.ipaddr.addr_family != SAI_IP_ADDR_FAMILY_IPV4) fail(SAI_STATUS_NOT_SUPPORTED, "only IPv4 mirror sessions are supported");
+        return iptext(a.value.ipaddr);
     case IP: return iptext(a.value.ipaddr);
     case INT: return std::to_string(a.value.s32);
     case STAGE: if (a.value.s32 == SAI_ACL_STAGE_INGRESS) return "ingress"; if (a.value.s32 == SAI_ACL_STAGE_EGRESS) return "egress"; break;
@@ -253,6 +289,12 @@ std::string decode(const Field& f, const sai_attribute_t& a) {
         else { std::memcpy(p.addr.ip6, a.value.aclfield.data.ip6, 16); std::memcpy(p.mask.ip6, a.value.aclfield.mask.ip6, 16); }
         return prefixtext(p);
     }
+    case MATCH_MAC:
+        for (auto byte : a.value.aclfield.mask.mac) if (byte != 255) fail(SAI_STATUS_NOT_SUPPORTED, "existing ACL src_mac uses non-exact mask");
+        return mactext(a.value.aclfield.data.mac);
+    case L4_PORT:
+        if (a.value.aclfield.mask.u16 != 65535) fail(SAI_STATUS_NOT_SUPPORTED, "existing ACL l4_dst_port uses non-exact mask");
+        return std::to_string(a.value.aclfield.data.u16);
     case PROTOCOL:
         if (a.value.aclfield.mask.u8 != 255) fail(SAI_STATUS_NOT_SUPPORTED, "existing ACL protocol uses non-exact mask; outside bounded u8 protocol match");
         return std::to_string(a.value.aclfield.data.u8);
@@ -260,26 +302,52 @@ std::string decode(const Field& f, const sai_attribute_t& a) {
     // Additional enum values on existing objects are observations, not writable symbols.
     return std::to_string(a.value.s32);
 }
-struct Family { bool v4; bool v6; bool src; bool dst; bool protocol; };
+struct Family {
+    bool v4; bool v6; bool src; bool dst; bool protocol; bool mac; bool l4;
+    bool mac_only() const { return !v4 && !v6 && mac && !l4; }
+};
 Family tablefamily(const Key& k) {
     bool s4 = read("acl_table", k, SAI_ACL_TABLE_ATTR_FIELD_SRC_IP).value.booldata;
     bool d4 = read("acl_table", k, SAI_ACL_TABLE_ATTR_FIELD_DST_IP).value.booldata;
     bool s6 = read("acl_table", k, SAI_ACL_TABLE_ATTR_FIELD_SRC_IPV6).value.booldata;
     bool d6 = read("acl_table", k, SAI_ACL_TABLE_ATTR_FIELD_DST_IPV6).value.booldata;
-    bool proto = read("acl_table", k, (s6 || d6) && !(s4 || d4) ? SAI_ACL_TABLE_ATTR_FIELD_IPV6_NEXT_HEADER : SAI_ACL_TABLE_ATTR_FIELD_IP_PROTOCOL).value.booldata;
-    return {s4 || d4, s6 || d6, s4 || s6, d4 || d6, proto};
+    bool p4 = read("acl_table", k, SAI_ACL_TABLE_ATTR_FIELD_IP_PROTOCOL).value.booldata;
+    bool p6 = read("acl_table", k, SAI_ACL_TABLE_ATTR_FIELD_IPV6_NEXT_HEADER).value.booldata;
+    bool mac = read("acl_table", k, SAI_ACL_TABLE_ATTR_FIELD_SRC_MAC).value.booldata;
+    bool l4 = read("acl_table", k, SAI_ACL_TABLE_ATTR_FIELD_L4_DST_PORT).value.booldata;
+    return {s4 || d4 || p4, s6 || d6 || p6, s4 || s6, d4 || d6, p4 || p6, mac, l4};
 }
 std::vector<Field> matchfields(const Family& f) {
-    if (f.v4 == f.v6) fail(SAI_STATUS_NOT_SUPPORTED, "ACL table must enable a single IPv4/IPv6 family for bounded entry management");
+    if (f.v4 == f.v6 && !f.mac_only()) fail(SAI_STATUS_NOT_SUPPORTED, "ACL table must enable a single IPv4/IPv6 family or MAC-only matching for bounded entry management");
     std::vector<Field> fs;
     if (f.src) fs.push_back({"src", f.v4 ? SAI_ACL_ENTRY_ATTR_FIELD_SRC_IP : SAI_ACL_ENTRY_ATTR_FIELD_SRC_IPV6, f.v4 ? MATCH4 : MATCH6, true, false});
     if (f.dst) fs.push_back({"dst", f.v4 ? SAI_ACL_ENTRY_ATTR_FIELD_DST_IP : SAI_ACL_ENTRY_ATTR_FIELD_DST_IPV6, f.v4 ? MATCH4 : MATCH6, true, false});
     if (f.protocol) fs.push_back({"protocol", f.v4 ? SAI_ACL_ENTRY_ATTR_FIELD_IP_PROTOCOL : SAI_ACL_ENTRY_ATTR_FIELD_IPV6_NEXT_HEADER, PROTOCOL, true, false});
+    if (f.mac) fs.push_back({"src_mac", SAI_ACL_ENTRY_ATTR_FIELD_SRC_MAC, MATCH_MAC, true, false});
+    if (f.l4) fs.push_back({"l4_dst_port", SAI_ACL_ENTRY_ATTR_FIELD_L4_DST_PORT, L4_PORT, true, false});
     return fs;
+}
+// Reject other mirror profiles before reading conditional fields or updating them.
+void mirror_profile(const Key& k, Attrs* out = nullptr) {
+    auto type = read("mirror_session", k, SAI_MIRROR_SESSION_ATTR_TYPE).value.s32;
+    if (type != SAI_MIRROR_SESSION_TYPE_ENHANCED_REMOTE) fail(SAI_STATUS_NOT_SUPPORTED, "only enhanced_remote mirror sessions are supported");
+    auto encap = read("mirror_session", k, SAI_MIRROR_SESSION_ATTR_ERSPAN_ENCAPSULATION_TYPE).value.s32;
+    auto version = read("mirror_session", k, SAI_MIRROR_SESSION_ATTR_IPHDR_VERSION).value.u8;
+    auto gre = read("mirror_session", k, SAI_MIRROR_SESSION_ATTR_GRE_PROTOCOL_TYPE).value.u16;
+    auto vlan = read("mirror_session", k, SAI_MIRROR_SESSION_ATTR_VLAN_HEADER_VALID).value.booldata;
+    auto ports = read("mirror_session", k, SAI_MIRROR_SESSION_ATTR_MONITOR_PORTLIST_VALID).value.booldata;
+    if (encap != SAI_ERSPAN_ENCAPSULATION_TYPE_MIRROR_L3_GRE_TUNNEL || version != 4 || gre != 0x88be || vlan || ports)
+        fail(SAI_STATUS_NOT_SUPPORTED, "mirror session is outside bounded IPv4 L3 GRE profile");
+    if (out) {
+        (*out)["type"] = "enhanced_remote"; (*out)["encap_type"] = "l3_gre";
+        (*out)["ip_version"] = std::to_string(version); (*out)["gre_protocol"] = std::to_string(gre);
+        (*out)["vlan_header_valid"] = boolean(vlan); (*out)["monitor_portlist_valid"] = boolean(ports);
+    }
 }
 sai_tui::Object observe(uint64_t sw, const std::string& kind, const Key& k) {
     sai_tui::Object out; out.kind = kind; out.key = k.text;
     auto fs = fields(kind);
+    if (kind == "mirror_session") mirror_profile(k, &out.attributes);
     // Some SDK member getters merely decode the OID, even after deletion.
     // Read the parent's actual MEMBER_LIST before treating the key as live.
     if (kind == "acl_group_member") {
@@ -306,6 +374,7 @@ sai_tui::Object observe(uint64_t sw, const std::string& kind, const Key& k) {
     }
     for (auto& f : fs) {
         std::string name = f.name;
+        if (kind == "acl_table" && (name == "src_mac_enabled" || name == "l4_dst_port_enabled")) continue; // Read once with family below.
         if (kind == "router_interface" && ((name == "port" && type != SAI_ROUTER_INTERFACE_TYPE_PORT) || (name == "vlan" && type != SAI_ROUTER_INTERFACE_TYPE_VLAN) || (name == "src_mac" && type == SAI_ROUTER_INTERFACE_TYPE_LOOPBACK))) continue;
         if (kind == "bridge_port" && name == "port" && type != SAI_BRIDGE_PORT_TYPE_PORT && type != SAI_BRIDGE_PORT_TYPE_SUB_PORT) continue;
         if (kind == "bridge_port" && name == "bridge" && (type == SAI_BRIDGE_PORT_TYPE_PORT || type == SAI_BRIDGE_PORT_TYPE_1Q_ROUTER)) continue;
@@ -331,6 +400,7 @@ sai_tui::Object observe(uint64_t sw, const std::string& kind, const Key& k) {
         out.attributes["bridge"] = hex(read("switch", key(sw, "switch", hex(sw)), SAI_SWITCH_ATTR_DEFAULT_1Q_BRIDGE_ID).value.oid);
     if (kind == "bridge_port" && type == SAI_BRIDGE_PORT_TYPE_1D_ROUTER) out.attributes["router_interface"] = hex(read(kind, k, SAI_BRIDGE_PORT_ATTR_RIF_ID).value.oid);
     if (kind == "port") {
+        out.attributes["egress_mirror_sessions"] = oidlist(list(kind, k, SAI_PORT_ATTR_EGRESS_MIRROR_SESSION));
         std::vector<uint32_t> lanes;
         bool done = false;
         for (unsigned tries = 0; tries < 4; ++tries) {
@@ -345,8 +415,9 @@ sai_tui::Object observe(uint64_t sw, const std::string& kind, const Key& k) {
         std::string text; for (auto n : lanes) { if (!text.empty()) text += ','; text += std::to_string(n); } out.attributes["lanes"] = text;
     }
     if (kind == "acl_table") {
-        auto f = tablefamily(k); out.attributes["family"] = f.v4 && !f.v6 ? "ipv4" : f.v6 && !f.v4 ? "ipv6" : "mixed-or-unspecified";
+        auto f = tablefamily(k); out.attributes["family"] = f.v4 && !f.v6 ? "ipv4" : f.v6 && !f.v4 ? "ipv6" : f.mac_only() ? "mac" : "mixed-or-unspecified";
         out.attributes["src_enabled"] = boolean(f.src); out.attributes["dst_enabled"] = boolean(f.dst); out.attributes["protocol_enabled"] = boolean(f.protocol);
+        out.attributes["src_mac_enabled"] = boolean(f.mac); out.attributes["l4_dst_port_enabled"] = boolean(f.l4);
     }
     if (kind == "acl_group") {
         out.attributes["type"] = std::to_string(read(kind, k, SAI_ACL_TABLE_GROUP_ATTR_TYPE).value.s32);
@@ -359,6 +430,8 @@ sai_tui::Object observe(uint64_t sw, const std::string& kind, const Key& k) {
             // Disabled fields are omitted, not represented as a fabricated /0 or protocol 0.
             if (a.value.aclfield.enable) out.attributes[f.name] = decode(f, a);
         }
+        if (out.attributes.count("l4_dst_port") && (!out.attributes.count("protocol") || out.attributes.at("protocol") != "6"))
+            fail(SAI_STATUS_NOT_SUPPORTED, "bounded l4_dst_port requires exact TCP protocol 6");
     }
     return out;
 }
@@ -378,7 +451,8 @@ std::vector<sai_attribute_t> prepare(uint64_t sw, const std::string& kind, const
     if (kind == "neighbor") special = {"router_interface", "ip"};
     if (kind == "route") special = {"virtual_router", "prefix"};
     if (kind == "acl_table") special = {"family"};
-    if (kind == "acl_entry") special = {"src", "dst", "protocol"};
+    if (kind == "acl_entry") special = {"src", "dst", "protocol", "src_mac", "l4_dst_port"};
+    if (kind == "port") special = {"egress_mirror_sessions"};
     std::vector<sai_attribute_t> attrs;
     for (const auto& kv : input) {
         auto it = allowed.find(kv.first);
@@ -388,12 +462,15 @@ std::vector<sai_attribute_t> prepare(uint64_t sw, const std::string& kind, const
             if (kind == "port" && !it->second.writable) invalid("read-only port attribute: " + kv.first);
             attrs.push_back(encode(it->second, kv.second));
         } else if (special.count(kv.first)) {
-            if (!creating && kind != "acl_entry") invalid(kv.first + " is immutable; replace the object");
+            if (!creating && kind != "acl_entry" && kind != "port") invalid(kv.first + " is immutable; replace the object");
             if (kv.first == "router_interface" || kv.first == "virtual_router") oid(kv.second);
             else if (kv.first == "ip") ip(kv.second);
             else if (kv.first == "prefix" || kv.first == "src" || kv.first == "dst") prefix(kv.second);
             else if (kv.first == "protocol") number(kv.second, 255);
-            else if (kv.first == "family" && kv.second != "ipv4" && kv.second != "ipv6") invalid("family must be ipv4/ipv6");
+            else if (kv.first == "src_mac") { uint8_t bytes[6]; mac(kv.second, bytes); }
+            else if (kv.first == "l4_dst_port") number(kv.second, 65535);
+            else if (kv.first == "egress_mirror_sessions") parse_oidlist(kv.second);
+            else if (kv.first == "family" && kv.second != "ipv4" && kv.second != "ipv6" && kv.second != "mac") invalid("family must be ipv4/ipv6/mac");
         } else invalid("unknown attribute for " + kind + ": " + kv.first);
     }
     if (creating) {
@@ -403,6 +480,13 @@ std::vector<sai_attribute_t> prepare(uint64_t sw, const std::string& kind, const
         if (kind == "acl_table" && !input.count("family")) invalid("acl_table requires family");
         if (kind == "router_interface" && input.count("port") + input.count("vlan") != 1) invalid("router_interface requires exactly one port or vlan");
     }
+    if (kind == "acl_table" && creating && input.at("family") == "mac") {
+        if (input.count("src_mac_enabled") && !boolean(input.at("src_mac_enabled"))) invalid("MAC family requires src_mac_enabled=true");
+        if (input.count("l4_dst_port_enabled") && boolean(input.at("l4_dst_port_enabled"))) invalid("MAC family does not support TCP port matching");
+    }
+    if (kind == "acl_entry" && input.count("l4_dst_port") &&
+        ((input.count("protocol") && number(input.at("protocol"), 255) != 6) || (creating && !input.count("protocol"))))
+        invalid("l4_dst_port requires explicit TCP protocol=6 on create, or existing TCP protocol on set");
     auto add32 = [&](sai_attr_id_t id, int32_t v) { sai_attribute_t a{}; a.id = id; a.value.s32 = v; attrs.push_back(a); };
     auto addbool = [&](sai_attr_id_t id, bool v) { sai_attribute_t a{}; a.id = id; a.value.booldata = v; attrs.push_back(a); };
     if (creating) {
@@ -417,11 +501,23 @@ std::vector<sai_attribute_t> prepare(uint64_t sw, const std::string& kind, const
         if (kind == "router_interface") add32(SAI_ROUTER_INTERFACE_ATTR_TYPE, input.count("port") ? SAI_ROUTER_INTERFACE_TYPE_PORT : SAI_ROUTER_INTERFACE_TYPE_VLAN);
         if (kind == "next_hop") add32(SAI_NEXT_HOP_ATTR_TYPE, SAI_NEXT_HOP_TYPE_IP);
         if (kind == "route" && !input.count("action")) add32(SAI_ROUTE_ENTRY_ATTR_PACKET_ACTION, SAI_PACKET_ACTION_FORWARD);
+        if (kind == "mirror_session") {
+            add32(SAI_MIRROR_SESSION_ATTR_TYPE, SAI_MIRROR_SESSION_TYPE_ENHANCED_REMOTE);
+            add32(SAI_MIRROR_SESSION_ATTR_ERSPAN_ENCAPSULATION_TYPE, SAI_ERSPAN_ENCAPSULATION_TYPE_MIRROR_L3_GRE_TUNNEL);
+            sai_attribute_t a{}; a.id = SAI_MIRROR_SESSION_ATTR_IPHDR_VERSION; a.value.u8 = 4; attrs.push_back(a);
+            a = {}; a.id = SAI_MIRROR_SESSION_ATTR_GRE_PROTOCOL_TYPE; a.value.u16 = 0x88be; attrs.push_back(a);
+            addbool(SAI_MIRROR_SESSION_ATTR_VLAN_HEADER_VALID, false);
+            addbool(SAI_MIRROR_SESSION_ATTR_MONITOR_PORTLIST_VALID, false);
+        }
         if (kind == "acl_table") {
-            bool v4 = input.at("family") == "ipv4";
-            addbool(v4 ? SAI_ACL_TABLE_ATTR_FIELD_SRC_IP : SAI_ACL_TABLE_ATTR_FIELD_SRC_IPV6, true);
-            addbool(v4 ? SAI_ACL_TABLE_ATTR_FIELD_DST_IP : SAI_ACL_TABLE_ATTR_FIELD_DST_IPV6, true);
-            addbool(v4 ? SAI_ACL_TABLE_ATTR_FIELD_IP_PROTOCOL : SAI_ACL_TABLE_ATTR_FIELD_IPV6_NEXT_HEADER, true);
+            if (input.at("family") == "mac") {
+                if (!input.count("src_mac_enabled")) addbool(SAI_ACL_TABLE_ATTR_FIELD_SRC_MAC, true);
+            } else {
+                bool v4 = input.at("family") == "ipv4";
+                addbool(v4 ? SAI_ACL_TABLE_ATTR_FIELD_SRC_IP : SAI_ACL_TABLE_ATTR_FIELD_SRC_IPV6, true);
+                addbool(v4 ? SAI_ACL_TABLE_ATTR_FIELD_DST_IP : SAI_ACL_TABLE_ATTR_FIELD_DST_IPV6, true);
+                addbool(v4 ? SAI_ACL_TABLE_ATTR_FIELD_IP_PROTOCOL : SAI_ACL_TABLE_ATTR_FIELD_IPV6_NEXT_HEADER, true);
+            }
         }
         if (kind == "acl_group") add32(SAI_ACL_TABLE_GROUP_ATTR_TYPE, SAI_ACL_TABLE_GROUP_TYPE_PARALLEL);
         if (kind == "acl_entry" && !input.count("enable")) addbool(SAI_ACL_ENTRY_ATTR_ADMIN_STATE, true);
@@ -432,14 +528,29 @@ std::vector<sai_attribute_t> prepare(uint64_t sw, const std::string& kind, const
             fail(SAI_STATUS_NOT_SUPPORTED, "bounded PORT bridge ports belong to default 1Q bridge; other bridge types require a different API");
         attrs.erase(std::remove_if(attrs.begin(), attrs.end(), [](const sai_attribute_t& a) { return a.id == SAI_BRIDGE_PORT_ATTR_BRIDGE_ID; }), attrs.end());
     }
-    if (kind == "acl_entry" && (input.count("src") || input.count("dst") || input.count("protocol"))) {
+    if (!creating && kind == "mirror_session") mirror_profile(k);
+    if (kind == "acl_entry") {
         sai_object_id_t table = creating ? oid(input.at("table")) : read(kind, k, SAI_ACL_ENTRY_ATTR_TABLE_ID).value.oid;
-        auto mf = matchfields(tablefamily(key(sw, "acl_table", hex(table))));
-        for (const char* name : {"src", "dst", "protocol"}) {
+        auto family = tablefamily(key(sw, "acl_table", hex(table)));
+        auto mf = matchfields(family);
+        for (const char* name : {"src", "dst", "protocol", "src_mac", "l4_dst_port"}) {
             auto it = input.find(name); if (it == input.end()) continue;
             auto f = std::find_if(mf.begin(), mf.end(), [&](const Field& f) { return std::string(f.name) == name; });
             if (f == mf.end()) fail(SAI_STATUS_NOT_SUPPORTED, std::string("ACL table does not support ") + name);
             attrs.push_back(encode(*f, it->second));
+        }
+        // Do not permit an update to turn a TCP-port entry into an unqualified
+        // transport-port match. Validate effective state before the first write.
+        if (!creating && family.l4 && (input.count("l4_dst_port") || input.count("protocol"))) {
+            bool port_enabled = input.count("l4_dst_port") || read(kind, k, SAI_ACL_ENTRY_ATTR_FIELD_L4_DST_PORT).value.aclfield.enable;
+            if (port_enabled) {
+                if (input.count("protocol")) {
+                    if (number(input.at("protocol"), 255) != 6) invalid("l4_dst_port requires TCP protocol=6");
+                } else {
+                    auto p = read(kind, k, family.v4 ? SAI_ACL_ENTRY_ATTR_FIELD_IP_PROTOCOL : SAI_ACL_ENTRY_ATTR_FIELD_IPV6_NEXT_HEADER).value.aclfield;
+                    if (!p.enable || p.mask.u8 != 255 || p.data.u8 != 6) invalid("l4_dst_port requires existing exact TCP protocol=6");
+                }
+            }
         }
     }
     return attrs;
@@ -492,6 +603,13 @@ void create(sai_tui::Object& out, uint64_t sw, const std::string& kind, const At
 void set(sai_tui::Object& out, uint64_t sw, const std::string& kind, const std::string& text, const Attrs& input) {
     std::lock_guard<std::mutex> lock(mutex); kindcheck(kind); auto k = key(sw, kind, text);
     auto attrs = prepare(sw, kind, input, false, k);
+    // Own list storage across all writes/readback; never retain caller pointers.
+    std::vector<sai_object_id_t> mirrors;
+    if (kind == "port" && input.count("egress_mirror_sessions")) {
+        mirrors = parse_oidlist(input.at("egress_mirror_sessions"));
+        sai_attribute_t a{}; a.id = SAI_PORT_ATTR_EGRESS_MIRROR_SESSION;
+        a.value.objlist.count = mirrors.size(); a.value.objlist.list = mirrors.empty() ? nullptr : mirrors.data(); attrs.push_back(a);
+    }
     size_t applied = 0;
     for (const auto& a : attrs) {
         try { check(rawset(kind, k, a), "SAI set attr " + std::to_string(a.id)); }
@@ -541,7 +659,7 @@ void remove(uint64_t sw, const std::string& kind, const std::string& text) {
 }
 void snapshot(sai_tui::Inventory& out, uint64_t sw) {
     std::lock_guard<std::mutex> lock(mutex); out.objects.clear(); out.warnings.clear();
-    out.warnings.push_back("Enumeration is limited to SAI switch ports/default VLAN/default virtual router/default bridge, their members, reachable 1D bridge RIFs, and objects created through this service in this server process; non-default VLAN/L3/ACL objects from other clients or previous processes are not exhaustively discoverable. Default 1Q bridge router ports do not expose individual VLAN RIF OIDs. No persistence.");
+    out.warnings.push_back("Enumeration is limited to SAI switch ports/default VLAN/default virtual router/default bridge, their members, reachable 1D bridge RIFs, port egress mirror sessions, and objects created through this service in this server process; non-default VLAN/L3/ACL/mirror objects from other clients or previous processes are not exhaustively discoverable. Default 1Q bridge router ports do not expose individual VLAN RIF OIDs. No persistence.");
     out.warnings.push_back("FDB enumeration is unavailable; use tui_get(fdb, known-key). Notification-derived legacy FDB state is not used as ASIC inventory.");
     std::set<std::pair<std::string, std::string>> seen;
     std::function<void(const std::string&, const std::string&)> add;
@@ -550,6 +668,7 @@ void snapshot(sai_tui::Inventory& out, uint64_t sw) {
         try {
             auto k = key(sw, kind, text); out.objects.push_back(observe(sw, kind, k));
             auto attrs = out.objects.back().attributes;
+            if (kind == "port") for (auto id : parse_oidlist(attrs.at("egress_mirror_sessions"))) add("mirror_session", hex(id));
             if (kind == "vlan") for (auto id : list(kind, k, SAI_VLAN_ATTR_MEMBER_LIST)) add("vlan_member", hex(id));
             if (kind == "bridge") for (auto id : list(kind, k, SAI_BRIDGE_ATTR_PORT_LIST)) add("bridge_port", hex(id));
             if (kind == "vlan_member") add("bridge_port", attrs.at("bridge_port"));

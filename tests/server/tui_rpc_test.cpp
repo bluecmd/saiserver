@@ -27,6 +27,9 @@ std::map<std::string, Record> entries;
 uint64_t nextid = 100;
 unsigned queries = 0, mutations = 0, gets = 0, writes = 0;
 sai_attr_id_t failget = UINT32_MAX;
+std::string failget_kind;
+sai_status_t failget_status = SAI_STATUS_NOT_SUPPORTED;
+sai_status_t remove_status = SAI_STATUS_SUCCESS;
 unsigned failwrite = 0;
 bool failcreate = false, wrongread = false, keepremoved = false;
 std::set<sai_stat_id_t> unsupported_stats;
@@ -57,6 +60,11 @@ void store(Record& r, uint32_t n, const sai_attribute_t* a) {
         if (r.kind == "acl_group" && a[i].id == SAI_ACL_TABLE_GROUP_ATTR_ACL_BIND_POINT_TYPE_LIST) {
             assert(a[i].value.s32list.count == 1 && a[i].value.s32list.list[0] == SAI_ACL_BIND_POINT_TYPE_PORT); continue;
         }
+        if (r.kind == "port" && a[i].id == SAI_PORT_ATTR_EGRESS_MIRROR_SESSION) {
+            const auto& list = a[i].value.objlist;
+            r.lists[a[i].id] = list.count ? std::vector<sai_object_id_t>(list.list, list.list + list.count) : std::vector<sai_object_id_t>{};
+            continue;
+        }
         r.values[a[i].id] = a[i].value;
     }
 }
@@ -73,7 +81,7 @@ sai_status_t create(const char* kind, sai_object_id_t* id, uint32_t n, const sai
 }
 sai_status_t read(Record& r, uint32_t n, sai_attribute_t* a) {
     ++gets; assert(n == 1);
-    if (a->id == failget) return SAI_STATUS_NOT_SUPPORTED;
+    if (a->id == failget && (failget_kind.empty() || failget_kind == r.kind)) return failget_status;
     if (r.lists.count(a->id)) {
         auto& v = r.lists.at(a->id); auto cap = a->value.objlist.count; a->value.objlist.count = v.size();
         if (cap < v.size()) return SAI_STATUS_BUFFER_OVERFLOW;
@@ -89,6 +97,8 @@ sai_status_t read(Record& r, uint32_t n, sai_attribute_t* a) {
     }
     a->value = r.values[a->id];
     if (wrongread && r.kind == "vlan" && a->id == SAI_VLAN_ATTR_VLAN_ID) ++a->value.u16;
+    if (wrongread && r.kind == "mirror_session" && a->id == SAI_MIRROR_SESSION_ATTR_TTL) a->value.u8 = 42;
+    if (wrongread && r.kind == "port" && a->id == SAI_PORT_ATTR_SPEED) a->value.u32 = 25000;
     return SAI_STATUS_SUCCESS;
 }
 sai_status_t getoid(sai_object_id_t id, uint32_t n, sai_attribute_t* a) {
@@ -106,10 +116,11 @@ sai_status_t setoid(sai_object_id_t id, const sai_attribute_t* a) {
     ++mutations; ++writes;
     if (writes == failwrite) return SAI_STATUS_OBJECT_IN_USE;
     if (!records.count(id)) return SAI_STATUS_ITEM_NOT_FOUND;
-    records[id].values[a->id] = a->value; return SAI_STATUS_SUCCESS;
+    store(records[id], 1, a); return SAI_STATUS_SUCCESS;
 }
 sai_status_t removeoid(sai_object_id_t id) {
-    ++mutations; if (!records.count(id)) return SAI_STATUS_ITEM_NOT_FOUND;
+    ++mutations; if (remove_status != SAI_STATUS_SUCCESS) return remove_status;
+    if (!records.count(id)) return SAI_STATUS_ITEM_NOT_FOUND;
     if (!keepremoved) {
         if (records.at(id).kind == "acl_group_member") {
             auto parent = records.at(id).values.at(SAI_ACL_TABLE_GROUP_MEMBER_ATTR_ACL_TABLE_GROUP_ID).oid;
@@ -127,7 +138,7 @@ sai_status_t removeoid(sai_object_id_t id) {
 }
 #define CREATOR(NAME) sai_status_t create_##NAME(sai_object_id_t* id, sai_object_id_t sw, uint32_t n, const sai_attribute_t* a) { assert(sw == 1); return create(#NAME, id, n, a); }
 CREATOR(port) CREATOR(vlan) CREATOR(vlan_member) CREATOR(bridge_port) CREATOR(virtual_router)
-CREATOR(router_interface) CREATOR(next_hop) CREATOR(acl_table) CREATOR(acl_entry) CREATOR(acl_group) CREATOR(acl_group_member)
+CREATOR(mirror_session) CREATOR(router_interface) CREATOR(next_hop) CREATOR(acl_table) CREATOR(acl_entry) CREATOR(acl_group) CREATOR(acl_group_member)
 #undef CREATOR
 sai_status_t cn(const sai_neighbor_entry_t* e, uint32_t n, const sai_attribute_t* a) {
     ++mutations; assert(e->switch_id == 1); auto k = nk(e);
@@ -160,9 +171,10 @@ sai_status_t stats(sai_object_id_t id, uint32_t n, const sai_stat_id_t* stat, ui
 sai_port_api_t ports{}; sai_vlan_api_t vlans{}; sai_bridge_api_t bridges{};
 sai_virtual_router_api_t vrs{}; sai_router_interface_api_t rifs{}; sai_next_hop_api_t nhs{};
 sai_neighbor_api_t neighbors{}; sai_route_api_t routes{}; sai_acl_api_t acls{};
-sai_switch_api_t switches{}; sai_fdb_api_t fdb{};
+sai_switch_api_t switches{}; sai_fdb_api_t fdb{}; sai_mirror_api_t mirrors{};
 void init() {
 #define BIND(TABLE, NAME, CREATE) TABLE.create_##NAME = CREATE; TABLE.remove_##NAME = removeoid; TABLE.set_##NAME##_attribute = setoid; TABLE.get_##NAME##_attribute = getoid
+    BIND(mirrors, mirror_session, create_mirror_session);
     BIND(ports, port, create_port); BIND(vlans, vlan, create_vlan); BIND(vlans, vlan_member, create_vlan_member);
     BIND(bridges, bridge_port, create_bridge_port); bridges.get_bridge_attribute = getoid;
     BIND(vrs, virtual_router, create_virtual_router); BIND(rifs, router_interface, create_router_interface);
@@ -181,7 +193,7 @@ void init() {
     records[2].kind = "vlan"; records[2].values[SAI_VLAN_ATTR_VLAN_ID].u16 = 1; records[2].lists[SAI_VLAN_ATTR_MEMBER_LIST] = {6};
     records[3].kind = "virtual_router";
     records[4].kind = "bridge"; records[4].lists[SAI_BRIDGE_ATTR_PORT_LIST] = {7, 8};
-    records[5].kind = "port";
+    records[5].kind = "port"; records[5].lists[SAI_PORT_ATTR_EGRESS_MIRROR_SESSION] = {};
     records[6].kind = "vlan_member"; records[6].values[SAI_VLAN_MEMBER_ATTR_VLAN_ID].oid = 2; records[6].values[SAI_VLAN_MEMBER_ATTR_BRIDGE_PORT_ID].oid = 7;
     records[7].kind = "bridge_port"; records[7].values[SAI_BRIDGE_PORT_ATTR_TYPE].s32 = SAI_BRIDGE_PORT_TYPE_PORT; records[7].values[SAI_BRIDGE_PORT_ATTR_PORT_ID].oid = 5;
     records[8].kind = "bridge_port"; records[8].values[SAI_BRIDGE_PORT_ATTR_TYPE].s32 = SAI_BRIDGE_PORT_TYPE_1D_ROUTER; records[8].values[SAI_BRIDGE_PORT_ATTR_RIF_ID].oid = 9;
@@ -222,7 +234,7 @@ void validation() {
     auto before = queries;
     error([&] { tui_rpc::set(o, 1, "next_hop", "0x10", {{"ip", "::1"}}); }, SAI_STATUS_INVALID_PARAMETER, "immutable");
     error([&] { tui_rpc::set(o, 1, "port", "5", {{"admin", "true"}, {"unknown", "1"}}); }, SAI_STATUS_INVALID_PARAMETER);
-    error([&] { tui_rpc::set(o, 1, "port", "5", {{"speed", "10000"}}); }, SAI_STATUS_INVALID_PARAMETER);
+    error([&] { tui_rpc::set(o, 1, "port", "5", {{"speed", "0"}}); }, SAI_STATUS_INVALID_PARAMETER);
     error([&] { tui_rpc::set(o, 1, "port", "5", {}); }, SAI_STATUS_INVALID_PARAMETER);
     error([&] { tui_rpc::remove(1, "port", "5"); }, SAI_STATUS_NOT_SUPPORTED);
     error([&] { tui_rpc::create(o, 1, "fdb", {}); }, SAI_STATUS_NOT_SUPPORTED);
@@ -286,6 +298,250 @@ void crud() {
     }
     tui_rpc::get(o, 1, "fdb", "2@AA:BB:CC:DD:EE:FF"); assert(o.key == "0x2@aa:bb:cc:dd:ee:ff" && o.attributes.at("bridge_port") == "0x7");
     for (const auto& obj : {nh4, nh, rv, rif, vr, vm, bp, vlan}) tui_rpc::remove(1, obj.kind, obj.key);
+}
+void preset_mirrors() {
+    sai_tui::Object o;
+    const Attrs spec = {{"monitor_port", "5"}, {"src_ip", "192.0.2.1"}, {"dst_ip", "198.51.100.2"},
+        {"src_mac", "02:00:00:00:00:01"}, {"dst_mac", "02:00:00:00:00:02"}, {"ttl", "64"}, {"tos", "16"}};
+    auto bad = [&](const Attrs& a) {
+        auto before = queries;
+        error([&] { tui_rpc::create(o, 1, "mirror_session", a); }, SAI_STATUS_INVALID_PARAMETER);
+        assert(queries == before);
+    };
+    for (const auto& kv : spec) { auto a = spec; a.erase(kv.first); bad(a); }
+    for (const auto& kv : Attrs{{"src_ip", "::1"}, {"dst_ip", "1.2.3.999"}, {"src_mac", "0:00:00:00:00:01"},
+            {"dst_mac", "xx:00:00:00:00:02"}, {"monitor_port", "0"}, {"ttl", "256"}, {"tos", "-1"},
+            {"type", "local"}, {"encap_type", "l3_gre"}, {"gre_protocol", "35006"}, {"unknown", "1"}}) {
+        auto a = spec; a[kv.first] = kv.second; bad(a);
+    }
+    auto before = mutations;
+    failcreate = true; error([&] { tui_rpc::create(o, 1, "mirror_session", spec); }, SAI_STATUS_TABLE_FULL);
+    assert(mutations == before + 1); failcreate = false;
+    query_status = SAI_STATUS_UNINITIALIZED;
+    error([&] { tui_rpc::create(o, 1, "mirror_session", spec); }, SAI_STATUS_UNINITIALIZED);
+    query_status = SAI_STATUS_SUCCESS;
+    auto createfn = mirrors.create_mirror_session; mirrors.create_mirror_session = nullptr;
+    error([&] { tui_rpc::create(o, 1, "mirror_session", spec); }, SAI_STATUS_NOT_SUPPORTED);
+    mirrors.create_mirror_session = createfn;
+    wrongread = true; auto m = make("mirror_session", spec); wrongread = false;
+    assert(m.attributes.at("ttl") == "42"); // Not the requested 64.
+    uint64_t id = std::stoull(m.key, nullptr, 16);
+    auto& values = records.at(id).values;
+    assert(values.at(SAI_MIRROR_SESSION_ATTR_TYPE).s32 == SAI_MIRROR_SESSION_TYPE_ENHANCED_REMOTE);
+    assert(values.at(SAI_MIRROR_SESSION_ATTR_ERSPAN_ENCAPSULATION_TYPE).s32 == SAI_ERSPAN_ENCAPSULATION_TYPE_MIRROR_L3_GRE_TUNNEL);
+    assert(values.at(SAI_MIRROR_SESSION_ATTR_IPHDR_VERSION).u8 == 4);
+    assert(values.at(SAI_MIRROR_SESSION_ATTR_GRE_PROTOCOL_TYPE).u16 == 0x88be);
+    assert(!values.at(SAI_MIRROR_SESSION_ATTR_VLAN_HEADER_VALID).booldata && !values.at(SAI_MIRROR_SESSION_ATTR_MONITOR_PORTLIST_VALID).booldata);
+    assert(m.attributes.at("type") == "enhanced_remote" && m.attributes.at("encap_type") == "l3_gre");
+    assert(m.attributes.at("ip_version") == "4" && m.attributes.at("gre_protocol") == "35006");
+    Attrs update = {{"monitor_port", "6"}, {"src_ip", "203.0.113.1"}, {"dst_ip", "203.0.113.2"},
+        {"src_mac", "02:11:22:33:44:55"}, {"dst_mac", "02:AA:BB:CC:DD:EE"}, {"ttl", "255"}, {"tos", "0"}};
+    tui_rpc::set(o, 1, "mirror_session", m.key, update);
+    for (const auto& kv : update) if (kv.first != "monitor_port" && kv.first != "dst_mac") assert(o.attributes.at(kv.first) == kv.second);
+    assert(o.attributes.at("monitor_port") == "0x6" && o.attributes.at("dst_mac") == "02:aa:bb:cc:dd:ee");
+    before = queries;
+    for (const char* name : {"type", "encap_type", "ip_version", "gre_protocol", "vlan_header_valid", "monitor_portlist_valid"})
+        error([&] { tui_rpc::set(o, 1, "mirror_session", m.key, {{name, "1"}}); }, SAI_STATUS_INVALID_PARAMETER);
+    assert(queries == before);
+    for (auto attr : {SAI_MIRROR_SESSION_ATTR_TYPE, SAI_MIRROR_SESSION_ATTR_ERSPAN_ENCAPSULATION_TYPE,
+            SAI_MIRROR_SESSION_ATTR_IPHDR_VERSION, SAI_MIRROR_SESSION_ATTR_GRE_PROTOCOL_TYPE,
+            SAI_MIRROR_SESSION_ATTR_VLAN_HEADER_VALID, SAI_MIRROR_SESSION_ATTR_MONITOR_PORTLIST_VALID,
+            SAI_MIRROR_SESSION_ATTR_MONITOR_PORT, SAI_MIRROR_SESSION_ATTR_SRC_IP_ADDRESS, SAI_MIRROR_SESSION_ATTR_DST_IP_ADDRESS,
+            SAI_MIRROR_SESSION_ATTR_SRC_MAC_ADDRESS, SAI_MIRROR_SESSION_ATTR_DST_MAC_ADDRESS, SAI_MIRROR_SESSION_ATTR_TTL, SAI_MIRROR_SESSION_ATTR_TOS}) {
+        failget = attr; failget_status = SAI_STATUS_ATTR_NOT_IMPLEMENTED_0;
+        error([&] { tui_rpc::get(o, 1, "mirror_session", m.key); }, SAI_STATUS_ATTR_NOT_IMPLEMENTED_0);
+    }
+    failget = UINT32_MAX; failget_status = SAI_STATUS_NOT_SUPPORTED;
+    for (auto attr : {SAI_MIRROR_SESSION_ATTR_TYPE, SAI_MIRROR_SESSION_ATTR_ERSPAN_ENCAPSULATION_TYPE,
+            SAI_MIRROR_SESSION_ATTR_IPHDR_VERSION, SAI_MIRROR_SESSION_ATTR_GRE_PROTOCOL_TYPE,
+            SAI_MIRROR_SESSION_ATTR_VLAN_HEADER_VALID, SAI_MIRROR_SESSION_ATTR_MONITOR_PORTLIST_VALID}) {
+        auto saved = values.at(attr); values[attr].u32 = 99;
+        // bool union members must hold a valid bool, even in the fake backend.
+        if (attr == SAI_MIRROR_SESSION_ATTR_VLAN_HEADER_VALID || attr == SAI_MIRROR_SESSION_ATTR_MONITOR_PORTLIST_VALID) values[attr].booldata = true;
+        before = mutations;
+        error([&] { tui_rpc::get(o, 1, "mirror_session", m.key); }, SAI_STATUS_NOT_SUPPORTED);
+        error([&] { tui_rpc::set(o, 1, "mirror_session", m.key, {{"ttl", "1"}}); }, SAI_STATUS_NOT_SUPPORTED);
+        assert(mutations == before); values[attr] = saved;
+    }
+    auto savedip = values.at(SAI_MIRROR_SESSION_ATTR_SRC_IP_ADDRESS);
+    values[SAI_MIRROR_SESSION_ATTR_SRC_IP_ADDRESS].ipaddr.addr_family = SAI_IP_ADDR_FAMILY_IPV6;
+    error([&] { tui_rpc::get(o, 1, "mirror_session", m.key); }, SAI_STATUS_NOT_SUPPORTED);
+    values[SAI_MIRROR_SESSION_ATTR_SRC_IP_ADDRESS] = savedip;
+    failwrite = writes + 2; before = mutations;
+    error([&] { tui_rpc::set(o, 1, "mirror_session", m.key, {{"tos", "1"}, {"ttl", "2"}}); }, SAI_STATUS_OBJECT_IN_USE, "partial readback observed");
+    assert(mutations == before + 2); failwrite = 0;
+    failget = SAI_MIRROR_SESSION_ATTR_TTL;
+    error([&] { tui_rpc::set(o, 1, "mirror_session", m.key, {{"ttl", "2"}}); }, SAI_STATUS_NOT_SUPPORTED, "READBACK FAILED");
+    auto failedid = nextid;
+    error([&] { tui_rpc::create(o, 1, "mirror_session", spec); }, SAI_STATUS_NOT_SUPPORTED, "READBACK FAILED");
+    failget = UINT32_MAX;
+    // Known-key and port-list discovery work even for a session not registered by the service.
+    auto external = nextid++; records[external] = records.at(id);
+    tui_rpc::get(o, 1, "mirror_session", h(external)); assert(o.key == h(external));
+    tui_rpc::set(o, 1, "port", "5", {{"egress_mirror_sessions", m.key + "," + h(external)}});
+    assert(o.attributes.at("egress_mirror_sessions") == m.key + "," + h(external));
+    assert(records.at(5).lists.at(SAI_PORT_ATTR_EGRESS_MIRROR_SESSION) == (std::vector<sai_object_id_t>{id, external}));
+    sai_tui::Inventory inv; tui_rpc::snapshot(inv, 1);
+    for (auto expected : {id, external, failedid}) {
+        assert(std::count_if(inv.objects.begin(), inv.objects.end(), [&](const sai_tui::Object& x) { return x.kind == "mirror_session" && x.key == h(expected); }) == 1);
+    }
+    failget = SAI_MIRROR_SESSION_ATTR_TTL; tui_rpc::snapshot(inv, 1);
+    assert(std::none_of(inv.objects.begin(), inv.objects.end(), [](const sai_tui::Object& x) { return x.kind == "mirror_session"; }));
+    assert(inv.warnings.size() >= 5); failget = UINT32_MAX;
+    before = queries;
+    for (const char* list : {"0", "1,", ",1", "1,,2", "1, 2", "1,0x1", "-1", "0xg"})
+        error([&] { tui_rpc::set(o, 1, "port", "5", {{"admin", "true"}, {"egress_mirror_sessions", list}}); }, SAI_STATUS_INVALID_PARAMETER);
+    for (const char* speed : {"0", "-1", "100G", "4294967296", " 10000"})
+        error([&] { tui_rpc::set(o, 1, "port", "5", {{"speed", speed}}); }, SAI_STATUS_INVALID_PARAMETER);
+    std::string huge;
+    for (unsigned i = 1; i <= 65537; ++i) { if (!huge.empty()) huge += ','; huge += std::to_string(i); }
+    error([&] { tui_rpc::set(o, 1, "port", "5", {{"egress_mirror_sessions", huge}}); }, SAI_STATUS_INVALID_PARAMETER);
+    assert(queries == before);
+    // Readback follows external changes too; no requested-list cache.
+    records.at(5).lists[SAI_PORT_ATTR_EGRESS_MIRROR_SESSION] = {external};
+    tui_rpc::get(o, 1, "port", "5"); assert(o.attributes.at("egress_mirror_sessions") == h(external));
+    wrongread = true; tui_rpc::set(o, 1, "port", "5", {{"speed", "10000"}}); wrongread = false;
+    assert(records.at(5).values.at(SAI_PORT_ATTR_SPEED).u32 == 10000 && o.attributes.at("speed") == "25000");
+    for (const char* name : {"speed", "egress_mirror_sessions"}) {
+        failwrite = writes + 1;
+        error([&] { tui_rpc::set(o, 1, "port", "5", {{name, "123"}}); }, SAI_STATUS_OBJECT_IN_USE);
+        failwrite = 0;
+    }
+    failget = SAI_PORT_ATTR_EGRESS_MIRROR_SESSION;
+    error([&] { tui_rpc::set(o, 1, "port", "5", {{"egress_mirror_sessions", ""}}); }, SAI_STATUS_NOT_SUPPORTED, "READBACK FAILED");
+    error([&] { tui_rpc::get(o, 1, "port", "5"); }, SAI_STATUS_NOT_SUPPORTED);
+    failget = UINT32_MAX;
+    tui_rpc::set(o, 1, "port", "5", {{"egress_mirror_sessions", ""}}); assert(o.attributes.at("egress_mirror_sessions").empty());
+    remove_status = SAI_STATUS_OBJECT_IN_USE;
+    error([&] { tui_rpc::remove(1, "mirror_session", m.key); }, SAI_STATUS_OBJECT_IN_USE);
+    remove_status = SAI_STATUS_SUCCESS; keepremoved = true;
+    error([&] { tui_rpc::remove(1, "mirror_session", m.key); }, SAI_STATUS_FAILURE, "still readable");
+    keepremoved = false; forced_get_status = SAI_STATUS_FAILURE;
+    auto saved = records.at(id);
+    error([&] { tui_rpc::remove(1, "mirror_session", m.key); }, SAI_STATUS_FAILURE, "absence could not be confirmed");
+    forced_get_status = SAI_STATUS_SUCCESS; records[id] = saved;
+    for (auto gone : {id, external, failedid}) {
+        tui_rpc::remove(1, "mirror_session", h(gone));
+        error([&] { tui_rpc::get(o, 1, "mirror_session", h(gone)); }, SAI_STATUS_ITEM_NOT_FOUND);
+    }
+}
+void preset_acls() {
+    sai_tui::Object o;
+    for (const char* family : {"ipv4", "ipv6", "mac"}) {
+        bool mac = std::string(family) == "mac", v4 = std::string(family) == "ipv4";
+        auto t = make("acl_table", {{"stage", "ingress"}, {"family", family}, {"src_mac_enabled", "true"}, {"l4_dst_port_enabled", mac ? "false" : "true"}});
+        assert(t.attributes.at("family") == family && t.attributes.at("src_mac_enabled") == "true");
+        assert(t.attributes.at("l4_dst_port_enabled") == (mac ? "false" : "true"));
+        assert(t.attributes.at("src_enabled") == (mac ? "false" : "true") && t.attributes.at("protocol_enabled") == (mac ? "false" : "true"));
+        auto tid = std::stoull(t.key, nullptr, 16);
+        assert(records.at(tid).values.at(SAI_ACL_TABLE_ATTR_FIELD_SRC_MAC).booldata);
+        Attrs spec = {{"table", t.key}, {"priority", "100"}, {"action", "deny"}, {"src_mac", "AA:BB:CC:DD:EE:FF"}};
+        if (!mac) { spec["protocol"] = "6"; spec["l4_dst_port"] = "443"; }
+        auto e = make("acl_entry", spec); auto eid = std::stoull(e.key, nullptr, 16);
+        assert(e.attributes.at("src_mac") == "aa:bb:cc:dd:ee:ff" && e.attributes.at("action") == "deny");
+        auto& vals = records.at(eid).values;
+        auto& mf = vals.at(SAI_ACL_ENTRY_ATTR_FIELD_SRC_MAC).aclfield;
+        assert(mf.enable && mf.data.mac[0] == 0xaa);
+        for (auto byte : mf.mask.mac) assert(byte == 255);
+        if (!mac) {
+            assert(e.attributes.at("l4_dst_port") == "443");
+            auto& port = vals.at(SAI_ACL_ENTRY_ATTR_FIELD_L4_DST_PORT).aclfield;
+            assert(port.enable && port.data.u16 == 443 && port.mask.u16 == 65535);
+            tui_rpc::set(o, 1, "acl_entry", e.key, {{"l4_dst_port", "65535"}}); assert(o.attributes.at("l4_dst_port") == "65535");
+            auto before = mutations;
+            error([&] { tui_rpc::set(o, 1, "acl_entry", e.key, {{"action", "permit"}, {"protocol", "17"}}); }, SAI_STATUS_INVALID_PARAMETER);
+            assert(mutations == before);
+            port.data.u16 = 22; tui_rpc::get(o, 1, "acl_entry", e.key); assert(o.attributes.at("l4_dst_port") == "22");
+            port.mask.u16 = 255;
+            error([&] { tui_rpc::get(o, 1, "acl_entry", e.key); }, SAI_STATUS_NOT_SUPPORTED, "non-exact mask"); port.mask.u16 = 65535;
+            auto pid = v4 ? SAI_ACL_ENTRY_ATTR_FIELD_IP_PROTOCOL : SAI_ACL_ENTRY_ATTR_FIELD_IPV6_NEXT_HEADER;
+            vals[pid].aclfield.data.u8 = 17;
+            error([&] { tui_rpc::get(o, 1, "acl_entry", e.key); }, SAI_STATUS_NOT_SUPPORTED, "TCP");
+            before = mutations;
+            error([&] { tui_rpc::set(o, 1, "acl_entry", e.key, {{"l4_dst_port", "1"}}); }, SAI_STATUS_INVALID_PARAMETER, "TCP");
+            assert(mutations == before); vals[pid].aclfield.data.u8 = 6;
+            failget = SAI_ACL_ENTRY_ATTR_FIELD_L4_DST_PORT;
+            error([&] { tui_rpc::get(o, 1, "acl_entry", e.key); }, SAI_STATUS_NOT_SUPPORTED); failget = UINT32_MAX;
+        } else {
+            // No IP/protocol/EtherType qualifiers: MAC matches include non-IP frames.
+            assert(!e.attributes.count("protocol") && !e.attributes.count("src") && !e.attributes.count("dst"));
+            assert(!vals.count(SAI_ACL_ENTRY_ATTR_FIELD_IP_PROTOCOL) && !vals.count(SAI_ACL_ENTRY_ATTR_FIELD_IPV6_NEXT_HEADER));
+            auto before = mutations;
+            error([&] { tui_rpc::set(o, 1, "acl_entry", e.key, {{"protocol", "6"}}); }, SAI_STATUS_NOT_SUPPORTED);
+            error([&] { tui_rpc::set(o, 1, "acl_entry", e.key, {{"src", "0.0.0.0/0"}}); }, SAI_STATUS_NOT_SUPPORTED);
+            assert(mutations == before);
+        }
+        tui_rpc::set(o, 1, "acl_entry", e.key, {{"src_mac", "02:00:00:00:00:01"}}); assert(o.attributes.at("src_mac") == "02:00:00:00:00:01");
+        mf.data.mac[5] = 2; tui_rpc::get(o, 1, "acl_entry", e.key); assert(o.attributes.at("src_mac") == "02:00:00:00:00:02");
+        mf.mask.mac[0] = 0;
+        error([&] { tui_rpc::get(o, 1, "acl_entry", e.key); }, SAI_STATUS_NOT_SUPPORTED, "non-exact mask"); mf.mask.mac[0] = 255;
+        failget = SAI_ACL_ENTRY_ATTR_FIELD_SRC_MAC; failget_kind = "acl_entry";
+        error([&] { tui_rpc::set(o, 1, "acl_entry", e.key, {{"src_mac", "02:00:00:00:00:03"}}); }, SAI_STATUS_NOT_SUPPORTED, "READBACK FAILED");
+        failget = UINT32_MAX; failget_kind.clear();
+        failwrite = writes + 1;
+        error([&] { tui_rpc::set(o, 1, "acl_entry", e.key, {{"src_mac", "02:00:00:00:00:04"}}); }, SAI_STATUS_OBJECT_IN_USE); failwrite = 0;
+        mf.enable = false; tui_rpc::get(o, 1, "acl_entry", e.key); assert(!o.attributes.count("src_mac"));
+        for (auto attr : {SAI_ACL_TABLE_ATTR_FIELD_SRC_MAC, SAI_ACL_TABLE_ATTR_FIELD_L4_DST_PORT}) {
+            failget = attr;
+            error([&] { tui_rpc::get(o, 1, "acl_table", t.key); }, SAI_STATUS_NOT_SUPPORTED);
+            auto before = mutations;
+            error([&] { tui_rpc::set(o, 1, "acl_entry", e.key, {{"action", "permit"}}); }, SAI_STATUS_NOT_SUPPORTED); assert(mutations == before);
+        }
+        failget = UINT32_MAX;
+        tui_rpc::remove(1, "acl_entry", e.key); tui_rpc::remove(1, "acl_table", t.key);
+    }
+    auto before = queries;
+    for (const auto& kv : std::vector<std::pair<std::string, std::string>>{{"src_mac", "02:00:00:00:00:01/48"}, {"l4_dst_port", "65536"}, {"l4_dst_port", "-1"}}) {
+        Attrs a = {{"table", "10"}, {"priority", "1"}, {"action", "deny"}, {"protocol", "6"}}; a[kv.first] = kv.second;
+        error([&] { tui_rpc::create(o, 1, "acl_entry", a); }, SAI_STATUS_INVALID_PARAMETER);
+    }
+    for (const char* protocol : {"", "17"}) {
+        Attrs a = {{"table", "10"}, {"priority", "1"}, {"action", "deny"}, {"l4_dst_port", "443"}};
+        if (*protocol) a["protocol"] = protocol;
+        error([&] { tui_rpc::create(o, 1, "acl_entry", a); }, SAI_STATUS_INVALID_PARAMETER);
+    }
+    for (const auto& kv : Attrs{{"src_mac_enabled", "false"}, {"l4_dst_port_enabled", "true"}})
+        error([&] { tui_rpc::create(o, 1, "acl_table", {{"stage", "ingress"}, {"family", "mac"}, kv}); }, SAI_STATUS_INVALID_PARAMETER);
+    error([&] { tui_rpc::create(o, 1, "acl_table", {{"stage", "ingress"}, {"family", "ipv4"}, {"src_mac_enabled", "1"}}); }, SAI_STATUS_INVALID_PARAMETER);
+    assert(queries == before);
+    auto legacy = make("acl_table", {{"stage", "ingress"}, {"family", "ipv4"}});
+    before = queries;
+    for (const char* name : {"src_mac_enabled", "l4_dst_port_enabled"})
+        error([&] { tui_rpc::set(o, 1, "acl_table", legacy.key, {{name, "true"}}); }, SAI_STATUS_INVALID_PARAMETER, "immutable");
+    assert(queries == before);
+    assert(legacy.attributes.at("src_mac_enabled") == "false" && legacy.attributes.at("l4_dst_port_enabled") == "false");
+    for (const auto& kv : Attrs{{"src_mac", "02:00:00:00:00:01"}, {"l4_dst_port", "443"}}) {
+        before = mutations;
+        error([&] { tui_rpc::create(o, 1, "acl_entry", {{"table", legacy.key}, {"priority", "1"}, {"action", "deny"}, {"protocol", "6"}, kv}); }, SAI_STATUS_NOT_SUPPORTED);
+        assert(mutations == before);
+    }
+    tui_rpc::remove(1, "acl_table", legacy.key);
+    // Independent deny predicates in parallel tables: no implicit catchall permit
+    // or conjunction added by this API. All resources and bindings are explicit.
+    auto mac = make("acl_table", {{"stage", "ingress"}, {"family", "mac"}});
+    auto tcp = make("acl_table", {{"stage", "ingress"}, {"family", "ipv4"}, {"l4_dst_port_enabled", "true"}});
+    auto group = make("acl_group", {{"stage", "ingress"}});
+    auto mm = make("acl_group_member", {{"group", group.key}, {"table", mac.key}, {"priority", "1"}});
+    auto tm = make("acl_group_member", {{"group", group.key}, {"table", tcp.key}, {"priority", "2"}});
+    before = mutations;
+    auto me = make("acl_entry", {{"table", mac.key}, {"priority", "100"}, {"action", "deny"}, {"src_mac", "02:00:00:00:00:01"}});
+    auto te = make("acl_entry", {{"table", tcp.key}, {"priority", "100"}, {"action", "deny"}, {"protocol", "6"}, {"l4_dst_port", "443"}});
+    assert(mutations == before + 2 && !me.attributes.count("l4_dst_port") && !te.attributes.count("src_mac"));
+    tui_rpc::set(o, 1, "port", "5", {{"ingress_acl", group.key}});
+    tui_rpc::set(o, 1, "port", "5", {{"ingress_acl", "0"}});
+    for (const auto& x : {te, me, tm, mm, group, tcp, mac}) tui_rpc::remove(1, x.kind, x.key);
+    // Explicit default deny with independent permit predicates in one table:
+    // no catchall permit, and no implicit conjunction of the two allow rules.
+    auto allow = make("acl_table", {{"stage", "ingress"}, {"family", "ipv4"}, {"src_mac_enabled", "true"}, {"l4_dst_port_enabled", "true"}});
+    before = mutations;
+    auto am = make("acl_entry", {{"table", allow.key}, {"priority", "300"}, {"action", "permit"}, {"src_mac", "02:00:00:00:00:01"}});
+    auto at = make("acl_entry", {{"table", allow.key}, {"priority", "200"}, {"action", "permit"}, {"protocol", "6"}, {"l4_dst_port", "0"}});
+    auto deny = make("acl_entry", {{"table", allow.key}, {"priority", "1"}, {"action", "deny"}});
+    assert(mutations == before + 3);
+    assert(!am.attributes.count("protocol") && !am.attributes.count("l4_dst_port"));
+    assert(!at.attributes.count("src_mac") && at.attributes.at("l4_dst_port") == "0");
+    for (const char* name : {"src", "dst", "protocol", "src_mac", "l4_dst_port"}) assert(!deny.attributes.count(name));
+    for (const auto& x : {deny, at, am, allow}) tui_rpc::remove(1, x.kind, x.key);
 }
 void failures() {
     sai_tui::Object o;
@@ -400,6 +656,7 @@ extern "C" sai_status_t sai_api_query(sai_api_t id, void** table) {
     ++queries;
     if (query_status != SAI_STATUS_SUCCESS) return query_status;
     switch (id) {
+    case SAI_API_MIRROR: *table = &mirrors; break;
     case SAI_API_PORT: *table = &ports; break;
     case SAI_API_VLAN: *table = &vlans; break;
     case SAI_API_BRIDGE: *table = &bridges; break;
@@ -416,6 +673,6 @@ extern "C" sai_status_t sai_api_query(sai_api_t id, void** table) {
     return SAI_STATUS_SUCCESS;
 }
 int main() {
-    init(); validation(); crud(); failures(); inventory_counters(); wire();
-    std::cout << "PASS: bounded CRUD IPv4/IPv6/L3/ACL, strict prevalidation, hardware readback, partial failures, discovery, counter subsets, inherited binary Thrift errors\n";
+    init(); validation(); crud(); preset_mirrors(); preset_acls(); failures(); inventory_counters(); wire();
+    std::cout << "PASS: bounded CRUD IPv4/IPv6/L3/ACL/MAC/TCP/ERSPAN, mirror binding/speed, strict prevalidation, hardware readback, partial failures, discovery, counter subsets, inherited binary Thrift errors\n";
 }
