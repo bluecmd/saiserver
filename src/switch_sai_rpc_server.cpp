@@ -31,6 +31,7 @@
 #include <iostream>
 #include <string>
 #include "switch_sai_rpc.h"
+#include "tui_rpc.h"
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/server/TSimpleServer.h>
 #include <thrift/transport/TServerSocket.h>
@@ -85,6 +86,27 @@ std::vector<std::pair<sai_fdb_entry_t, sai_object_id_t>>gFdbMap;
 class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
   public:
     switch_sai_rpcHandler() noexcept {
+    }
+
+    void tui_snapshot(sai_tui::Inventory& out) override {
+      tui_rpc::snapshot(out, gSwitchId);
+    }
+    void tui_get(sai_tui::Object& out, const std::string& kind, const std::string& key) override {
+      tui_rpc::get(out, gSwitchId, kind, key);
+    }
+    void tui_create(sai_tui::Object& out, const std::string& kind,
+                    const std::map<std::string, std::string>& attributes) override {
+      tui_rpc::create(out, gSwitchId, kind, attributes);
+    }
+    void tui_set(sai_tui::Object& out, const std::string& kind, const std::string& key,
+                 const std::map<std::string, std::string>& attributes) override {
+      tui_rpc::set(out, gSwitchId, kind, key, attributes);
+    }
+    void tui_remove(const std::string& kind, const std::string& key) override {
+      tui_rpc::remove(gSwitchId, kind, key);
+    }
+    void tui_port_counters(std::map<std::string, int64_t>& out, const std::string& key) override {
+      tui_rpc::port_counters(out, gSwitchId, key);
     }
 
     inline void sai_thrift_timestamp_print() const noexcept {
