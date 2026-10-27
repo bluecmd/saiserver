@@ -1,5 +1,6 @@
 pub mod client;
 pub mod command;
+pub mod presets;
 pub mod rates;
 // Checked-in output of: thrift --gen rs -out tui/src src/sai_tui.thrift
 #[allow(clippy::all)]
