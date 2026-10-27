@@ -225,6 +225,7 @@ void sai_diag_shell() {
 
 struct cmdOptions {
   std::string profileMapFile;
+  bool diagnosticShell = true;
 };
 
 cmdOptions handleCmdLine(int argc, char **argv) {
@@ -234,12 +235,13 @@ cmdOptions handleCmdLine(int argc, char **argv) {
   while(true) {
     static struct option long_options[] = {
       { "profile",          required_argument, 0, 'p' },
+      { "no-shell",         no_argument,       0, 'n' },
       { 0,                  0,                 0,  0  }
     };
 
     int option_index = 0;
 
-    int c = getopt_long(argc, argv, "p:f:S:", long_options, &option_index);
+    int c = getopt_long(argc, argv, "p:n", long_options, &option_index);
 
     if (c == -1) {
       break;
@@ -251,8 +253,12 @@ cmdOptions handleCmdLine(int argc, char **argv) {
       options.profileMapFile = std::string(optarg);
       break;
 
+    case 'n':
+      options.diagnosticShell = false;
+      break;
+
     default:
-      fprintf(stderr, "Usage: %s [-p sai.profile]\n", argv[0]);
+      fprintf(stderr, "Usage: %s [-p sai.profile] [--no-shell]\n", argv[0]);
       exit(EXIT_FAILURE);
     }
   }
@@ -335,7 +341,7 @@ int main(int argc, char* argv[]) {
   if (status == SAI_STATUS_SUCCESS) {
     int failed = sai_api_query(SAI_API_SWITCH, (void**)&sai_switch_api);
 
-    if (failed > 0) {
+    if (failed != SAI_STATUS_SUCCESS) {
       printf("SAI_API_SWITCH failed for %d apis", failed);
       exit(EXIT_FAILURE);
     }
@@ -353,7 +359,8 @@ int main(int argc, char* argv[]) {
   attr[0].id = SAI_SWITCH_ATTR_INIT_SWITCH;
   attr[0].value.booldata = true;
 
-  sai_mac_t mac = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  // Use a locally administered unicast router MAC (0x11 is multicast).
+  sai_mac_t mac = {0x02, 0x00, 0x00, 0x00, 0x04, 0x01};
 
   // NOTE: Seems like Broadcom SAI at least requires the MAC to be set
   // when init'ing or it will return SAI_STATUS_FAILURE.
@@ -378,8 +385,10 @@ int main(int argc, char* argv[]) {
     exit(EXIT_FAILURE);
   }
 
-  std::thread diag_shell_thread = std::thread(sai_diag_shell);
-  diag_shell_thread.detach();
+  if (options.diagnosticShell) {
+    std::thread diag_shell_thread = std::thread(sai_diag_shell);
+    diag_shell_thread.detach();
+  }
 
   start_sai_thrift_rpc_server(SWITCH_SAI_THRIFT_RPC_SERVER_PORT);
 
