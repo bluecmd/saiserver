@@ -9,3 +9,7 @@ saiserver
 .lab/
 .pi/
 target/
+
+# Bazel's output symlinks; dependency lockfiles remain tracked.
+/bazel-*
+/examples/bazel/bazel-*

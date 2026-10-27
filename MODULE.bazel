@@ -1,0 +1,77 @@
+module(
+    name = "saiserver",
+    version = "0.1.0",
+    bazel_compatibility = [">=9.3.1", "<10.0.0"],
+)
+
+# Match the bootstrapped LLVM toolchain API (0.2.27 removed a required flag).
+bazel_dep(name = "rules_cc", version = "0.2.17")
+bazel_dep(name = "rules_shell", version = "0.6.1")
+bazel_dep(name = "rules_rust", version = "0.75.0")
+bazel_dep(name = "bazel_skylib", version = "1.9.0")
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "toolchains_llvm_bootstrapped", version = "0.5.9")
+bazel_dep(name = "boost.uuid", version = "1.89.0.bcr.2")
+bazel_dep(name = "boost.predef", version = "1.89.0.bcr.2")
+
+# Includes LLVM, linker, libc headers/CRTs, C++ standard library and runtimes.
+# Never auto-detect a host compiler or /usr/include.
+register_toolchains("@toolchains_llvm_bootstrapped//toolchain:all")
+
+# Exact Rust release artifacts, including the host metadata tools. These hashes
+# come from static.rust-lang.org/dist/channel-rust-1.94.0.toml.
+RUST_SHA256S = {
+    "cargo-1.94.0-x86_64-unknown-linux-gnu.tar.xz": "8e17624f3de39e079845bfb25ed15a042f4b50ceca78e37c56c4b9b15949b9f7",
+    "clippy-1.94.0-x86_64-unknown-linux-gnu.tar.xz": "935529b0b9150084fa9cc1734c6598efe86b6e7d76f31ad3f8d4bb79ebf6031a",
+    "llvm-tools-1.94.0-x86_64-unknown-linux-gnu.tar.xz": "cf6b8e1d3e48ffa4db37aa59f55382b991f0d347d9b62eebc9ef1d80dffabef4",
+    "rust-std-1.94.0-x86_64-unknown-linux-gnu.tar.xz": "dd33653107c36e040082050d9e547e64dac5b456ba74069430d838c00c189a05",
+    "rustc-1.94.0-x86_64-unknown-linux-gnu.tar.xz": "31a0d3ac9383dfdeb4fce86eeed5ade3230131c635264c0eab7252dbf235f28e",
+    "rustfmt-1.94.0-x86_64-unknown-linux-gnu.tar.xz": "903e768f7626f78ed2d6cb82c1820b93bd339afec8575102e847fd3a379d33e5",
+}
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    edition = "2021",
+    versions = ["1.94.0"],
+    rustfmt_version = "1.94.0",
+    sha256s = RUST_SHA256S,
+)
+use_repo(rust, "rust_toolchains")
+register_toolchains("@rust_toolchains//:all")
+
+rust_host = use_extension("@rules_rust//rust:extensions.bzl", "rust_host_tools")
+rust_host.host_tools(
+    name = "saiserver_rust_host_tools",
+    version = "1.94.0",
+    rustfmt_version = "1.94.0",
+    sha256s = RUST_SHA256S,
+)
+use_repo(rust_host, "saiserver_rust_host_tools")
+
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "saiserver_crates",
+    cargo_lockfile = "//tui:Cargo.lock",
+    lockfile = "//tui:Cargo.Bazel.lock",
+    manifests = ["//tui:Cargo.toml"],
+    host_tools = "@saiserver_rust_host_tools//:BUILD.bazel",
+    isolated = True,
+    skip_cargo_lockfile_overwrite = True,
+    supported_platform_triples = ["x86_64-unknown-linux-gnu"],
+)
+use_repo(crate, "saiserver_crates")
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+http_archive(
+    name = "saiserver_thrift",
+    urls = ["https://archive.apache.org/dist/thrift/0.25.0/thrift-0.25.0.tar.gz"],
+    sha256 = "66da4707214c54c94bac082103dc67adaf9e08925662700f269170a7b534b214",
+    strip_prefix = "thrift-0.25.0",
+    build_file = "//bazel:thrift.BUILD.bazel",
+)
+http_archive(
+    name = "saiserver_sai",
+    urls = ["https://github.com/opencomputeproject/SAI/archive/refs/tags/v1.18.1.tar.gz"],
+    sha256 = "84f2fbd6bf672abaefddfd78a28fec794e37477bf9702fbb56d7bd53ff930ba3",
+    strip_prefix = "SAI-1.18.1",
+    build_file = "//bazel:sai.BUILD.bazel",
+)

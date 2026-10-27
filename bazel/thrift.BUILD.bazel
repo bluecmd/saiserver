@@ -1,0 +1,103 @@
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+# The official release contains the generated flex/bison parser. No configure,
+# CMake, make, flex, bison, Python or host compiler is needed.
+cc_binary(
+    name = "compiler",
+    srcs = [
+        "compiler/cpp/src/thrift/audit/t_audit.cpp",
+        "compiler/cpp/src/thrift/common.cc",
+        "compiler/cpp/src/thrift/generate/t_cpp_generator.cc",
+        "compiler/cpp/src/thrift/generate/t_generator.cc",
+        "compiler/cpp/src/thrift/generate/t_py_generator.cc",
+        "compiler/cpp/src/thrift/generate/t_rs_generator.cc",
+        "compiler/cpp/src/thrift/main.cc",
+        "compiler/cpp/src/thrift/parse/parse.cc",
+        "compiler/cpp/src/thrift/parse/t_typedef.cc",
+        "compiler/cpp/src/thrift/thriftl.cc",
+        "compiler/cpp/src/thrift/thrifty.cc",
+    ] + glob(["compiler/cpp/src/thrift/**/*.h", "compiler/cpp/src/thrift/**/*.hh"]),
+    includes = ["compiler/cpp/src"],
+    copts = ["-std=c++17"],
+)
+
+# Fixed Linux/glibc configuration, not host probes. This runtime intentionally
+# provides the binary/buffered socket + TSimpleServer stack used by saiserver;
+# SSL, HTTP, JSON, zlib, Qt and libevent transports are not part of this target.
+write_file(
+    name = "config",
+    out = "lib/cpp/src/thrift/config.h",
+    content = [
+        "#pragma once",
+        '#define PACKAGE_VERSION "0.25.0"',
+        "#define ARITHMETIC_RIGHT_SHIFT 1",
+        "#define SIGNED_RIGHT_SHIFT_IS 1",
+    ] + ["#define %s 1" % name for name in [
+        "HAVE_ARPA_INET_H",
+        "HAVE_CLOCK_GETTIME",
+        "HAVE_FCNTL_H",
+        "HAVE_GETADDRINFO",
+        "HAVE_GETHOSTBYNAME",
+        "HAVE_INTTYPES_H",
+        "HAVE_NETDB_H",
+        "HAVE_NETINET_IN_H",
+        "HAVE_POLL_H",
+        "HAVE_PTHREAD_H",
+        "HAVE_SCHED_H",
+        "HAVE_SIGNAL_H",
+        "HAVE_STDINT_H",
+        "HAVE_STRERROR_R",
+        "HAVE_STRINGS_H",
+        "HAVE_SYS_IOCTL_H",
+        "HAVE_SYS_PARAM_H",
+        "HAVE_SYS_POLL_H",
+        "HAVE_SYS_RESOURCE_H",
+        "HAVE_SYS_SELECT_H",
+        "HAVE_SYS_SOCKET_H",
+        "HAVE_SYS_STAT_H",
+        "HAVE_SYS_TIME_H",
+        "HAVE_SYS_TYPES_H",
+        "HAVE_SYS_UN_H",
+        "HAVE_UNISTD_H",
+    ]],
+)
+
+cc_library(
+    name = "runtime",
+    srcs = [
+        "lib/cpp/src/thrift/TApplicationException.cpp",
+        "lib/cpp/src/thrift/TOutput.cpp",
+        "lib/cpp/src/thrift/TUuid.cpp",
+        "lib/cpp/src/thrift/VirtualProfiling.cpp",
+        "lib/cpp/src/thrift/async/TConcurrentClientSyncInfo.cpp",
+        "lib/cpp/src/thrift/concurrency/Monitor.cpp",
+        "lib/cpp/src/thrift/concurrency/Mutex.cpp",
+        "lib/cpp/src/thrift/concurrency/Thread.cpp",
+        "lib/cpp/src/thrift/concurrency/ThreadFactory.cpp",
+        "lib/cpp/src/thrift/protocol/TProtocol.cpp",
+        "lib/cpp/src/thrift/server/TConnectedClient.cpp",
+        "lib/cpp/src/thrift/server/TServer.cpp",
+        "lib/cpp/src/thrift/server/TServerFramework.cpp",
+        "lib/cpp/src/thrift/server/TSimpleServer.cpp",
+        "lib/cpp/src/thrift/transport/SocketCommon.cpp",
+        "lib/cpp/src/thrift/transport/TBufferTransports.cpp",
+        "lib/cpp/src/thrift/transport/TServerSocket.cpp",
+        "lib/cpp/src/thrift/transport/TSocket.cpp",
+        "lib/cpp/src/thrift/transport/TTransportException.cpp",
+        "lib/cpp/src/thrift/transport/TTransportUtils.cpp",
+    ],
+    hdrs = glob(["lib/cpp/src/thrift/**/*.h", "lib/cpp/src/thrift/**/*.tcc"]) + [":config"],
+    strip_include_prefix = "lib/cpp/src",
+    copts = ["-std=c++17"],
+    local_defines = ["STRERROR_R_CHAR_P"],
+    linkopts = ["-pthread"],
+    deps = [
+        "@boost.predef//:boost.predef",
+        "@boost.uuid//:boost.uuid",
+    ],
+    target_compatible_with = ["@platforms//os:linux"],
+)
