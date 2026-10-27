@@ -264,6 +264,15 @@ pub fn build(bound: &BoundPreset, inventory: &Inventory) -> Result<Plan, String>
     for port in &bound.preset.ports {
         let oid = &bound.port_oids[&port.name];
         let port_ref = reference("port", oid);
+        // Access and direct routed transport accept untagged ingress only.
+        // PVID alone does not prevent VLAN-tagged injection into another SVI.
+        ops.push(Op::Set {
+            target: Target::Object(port_ref.clone()),
+            attrs: attributes(vec![
+                ("drop_tagged", literal(true)),
+                ("drop_untagged", literal(false)),
+            ]),
+        });
         let mut rif_attrs = vec![
             ("virtual_router", V::Reference(vr.clone())),
             ("src_mac", literal(&mac)),
@@ -567,11 +576,21 @@ mod tests {
         for cmd in &validation.preview {
             match cmd {
                 command::Command::Set { kind, key, attrs } if kind == "port" => {
-                    assert_eq!(
-                        attrs.len(),
-                        1,
-                        "security transitions must be separate verified operations"
-                    );
+                    if attrs.contains_key("admin")
+                        || attrs.contains_key("ingress_acl")
+                        || attrs.contains_key("egress_mirror_sessions")
+                    {
+                        assert_eq!(
+                            attrs.len(),
+                            1,
+                            "security transitions must be separate verified operations"
+                        );
+                    }
+                    if attrs.contains_key("drop_tagged") {
+                        assert!(down.contains(key));
+                        assert_eq!(attrs["drop_tagged"], "true");
+                        assert_eq!(attrs["drop_untagged"], "false");
+                    }
                     if attrs.get("admin").is_some_and(|a| a == "false") {
                         down.insert(key.clone());
                     }
@@ -777,14 +796,26 @@ mod tests {
             fail_policy: false,
             cancel_on_policy: None,
         };
-        mock.inventory.objects.as_mut().unwrap().push(Object::new(
-            "bridge_port".to_owned(),
-            "0x2000".to_owned(),
-            BTreeMap::from([
-                ("port".into(), "0x1".into()),
-                ("admin".into(), "false".into()),
-            ]),
-        ));
+        for i in 0..33 {
+            let bridge = format!("0x{:x}", 0x2000 + i);
+            mock.inventory.objects.as_mut().unwrap().push(Object::new(
+                "bridge_port".to_owned(),
+                bridge.clone(),
+                BTreeMap::from([
+                    ("port".into(), format!("0x{:x}", i + 1)),
+                    ("admin".into(), "false".into()),
+                ]),
+            ));
+            mock.inventory.objects.as_mut().unwrap().push(Object::new(
+                "vlan_member".to_owned(),
+                format!("0x{:x}", 0x3000 + i),
+                BTreeMap::from([
+                    ("bridge_port".into(), bridge),
+                    ("vlan".into(), "0x1001".into()),
+                    ("tagging".into(), "untagged".into()),
+                ]),
+            ));
+        }
         let bound = presets::bind(
             presets::get(presets::SEASTONE2_ID).unwrap(),
             &mock.inventory,
@@ -824,6 +855,18 @@ mod tests {
             ""
         );
         assert_eq!(transport.attributes.as_ref().unwrap()["ingress_acl"], "0x0");
+        assert!(mock.get("bridge_port", "0x2020").is_err());
+        for port in mock
+            .inventory
+            .objects
+            .as_ref()
+            .unwrap()
+            .iter()
+            .filter(|o| o.kind.as_deref() == Some("port"))
+        {
+            assert_eq!(port.attributes.as_ref().unwrap()["drop_tagged"], "true");
+            assert_eq!(port.attributes.as_ref().unwrap()["drop_untagged"], "false");
+        }
         assert!(
             build(&bound, &mock.inventory).is_err(),
             "no implicit overwrite/reapply"

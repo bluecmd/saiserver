@@ -106,6 +106,8 @@ pub const KINDS: &[&str] = &[
 pub fn fields(kind: &str) -> &'static [Field] {
     match kind {
         "port" => &[
+            f!("drop_tagged", Bool, false, true, "reject tagged ingress frames; access/routed preset ports use true"),
+            f!("drop_untagged", Bool, false, true, "reject untagged ingress frames; preset ports use false"),
             f!("speed", Number(1, u32::MAX as u64), false, true, "Mbps; actual supported speeds are platform-dependent"),
             f!("egress_mirror_sessions", OidList(&["mirror_session"]), false, true,
                 "comma-separated session OIDs; empty value detaches all; replaces the entire egress mirror list"),

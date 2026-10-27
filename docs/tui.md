@@ -183,7 +183,7 @@ field help in either frontend. `get` can show additional read-only attributes.
 
 | Kind | Create fields | Set fields / restrictions |
 | --- | --- | --- |
-| `port` | Existing only; no create/remove | `admin`, `pvid`, `speed` Mbps, `ingress_acl`/`egress_acl` table/group OID or `0x0`, `egress_mirror_sessions` comma-separated OIDs (empty detaches) |
+| `port` | Existing only; no create/remove | `admin`, `pvid`, `drop_tagged`/`drop_untagged`, `speed` Mbps, `ingress_acl`/`egress_acl` table/group OID or `0x0`, `egress_mirror_sessions` comma-separated OIDs (empty detaches) |
 | `mirror_session` | Required `monitor_port`, IPv4 `src_ip`/`dst_ip`, `src_mac`/`dst_mac`, `ttl`, `tos`; fixed enhanced-remote IPv4 L3 GRE profile | Same fields writable; real getter required |
 | `interface_address` | Required `router_interface`, `ingress_port`, host-preserving `address` CIDR; opt-in operational ARP/NDP service | Immutable; key `RIF@HOST/PREFIX`; software-service observations, not ASIC IP-address getters |
 | `vlan` | Required `vlan_id` 1..4094 | No writable fields; read `members` |

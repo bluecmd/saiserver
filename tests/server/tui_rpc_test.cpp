@@ -416,6 +416,11 @@ void preset_mirrors() {
     assert(o.attributes.count("unavailable.egress_mirror_sessions"));
     failget = UINT32_MAX;
     tui_rpc::set(o, 1, "port", "5", {{"egress_mirror_sessions", ""}}); assert(o.attributes.at("egress_mirror_sessions").empty());
+    tui_rpc::set(o, 1, "port", "5", {{"drop_tagged", "true"}, {"drop_untagged", "false"}});
+    assert(o.attributes.at("drop_tagged") == "true" && o.attributes.at("drop_untagged") == "false");
+    assert(records.at(5).values.at(SAI_PORT_ATTR_DROP_TAGGED).booldata);
+    assert(!records.at(5).values.at(SAI_PORT_ATTR_DROP_UNTAGGED).booldata);
+    error([&] { tui_rpc::set(o, 1, "port", "5", {{"drop_tagged", "invalid"}}); }, SAI_STATUS_INVALID_PARAMETER);
     remove_status = SAI_STATUS_OBJECT_IN_USE;
     error([&] { tui_rpc::remove(1, "mirror_session", m.key); }, SAI_STATUS_OBJECT_IN_USE);
     remove_status = SAI_STATUS_SUCCESS; keepremoved = true;

@@ -67,7 +67,9 @@ VLAN **N** has one RIF and two operational responder address records:
 
 There are **33 RIFs and 65 local addresses**. Host bits are preserved separately
 from connected-route prefixes. A dedicated dual-stack virtual router is created.
-Connected routes point to each RIF. Separate VLANs provide L2 broadcast-domain
+Connected routes point to each RIF. All 33 ports explicitly reject tagged ingress
+and accept untagged ingress (`drop_tagged=true`, `drop_untagged=false`); setting
+PVID alone would not prevent tagged injection into another SVI. Separate VLANs provide L2 broadcast-domain
 isolation; no additional inter-VLAN isolation policy is requested.
 
 The preset matches **actual discovered lane sets and speed**, never row order,

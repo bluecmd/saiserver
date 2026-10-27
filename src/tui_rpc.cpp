@@ -194,7 +194,7 @@ enum Type { BOOL, U8, U16, U32, OID, NULL_OID, MAC, IP, IPV4, STAGE, LEARNING, T
 struct Field { const char* name; sai_attr_id_t id; Type type; bool writable; bool required; };
 std::vector<Field> fields(const std::string& k) {
 #define F(N, ID, T, W, R) {N, ID, T, W, R}
-    if (k == "port") return {F("admin", SAI_PORT_ATTR_ADMIN_STATE, BOOL, true, false), F("pvid", SAI_PORT_ATTR_PORT_VLAN_ID, U16, true, false), F("ingress_acl", SAI_PORT_ATTR_INGRESS_ACL, NULL_OID, true, false), F("egress_acl", SAI_PORT_ATTR_EGRESS_ACL, NULL_OID, true, false), F("speed", SAI_PORT_ATTR_SPEED, U32, true, false), F("oper_status", SAI_PORT_ATTR_OPER_STATUS, INT, false, false)};
+    if (k == "port") return {F("drop_tagged", SAI_PORT_ATTR_DROP_TAGGED, BOOL, true, false), F("drop_untagged", SAI_PORT_ATTR_DROP_UNTAGGED, BOOL, true, false), F("admin", SAI_PORT_ATTR_ADMIN_STATE, BOOL, true, false), F("pvid", SAI_PORT_ATTR_PORT_VLAN_ID, U16, true, false), F("ingress_acl", SAI_PORT_ATTR_INGRESS_ACL, NULL_OID, true, false), F("egress_acl", SAI_PORT_ATTR_EGRESS_ACL, NULL_OID, true, false), F("speed", SAI_PORT_ATTR_SPEED, U32, true, false), F("oper_status", SAI_PORT_ATTR_OPER_STATUS, INT, false, false)};
     if (k == "mirror_session") return {
         F("monitor_port", SAI_MIRROR_SESSION_ATTR_MONITOR_PORT, OID, true, true),
         F("src_ip", SAI_MIRROR_SESSION_ATTR_SRC_IP_ADDRESS, IPV4, true, true),
@@ -387,7 +387,7 @@ sai_tui::Object observe(uint64_t sw, const std::string& kind, const Key& k) {
                 e.status == SAI_STATUS_NOT_IMPLEMENTED ||
                 SAI_STATUS_IS_ATTR_NOT_IMPLEMENTED(e.status) ||
                 SAI_STATUS_IS_ATTR_NOT_SUPPORTED(e.status);
-            if (kind != "port" || (name != "ingress_acl" && name != "egress_acl") || !unsupported) throw;
+            if (kind != "port" || (name != "ingress_acl" && name != "egress_acl" && name != "drop_tagged" && name != "drop_untagged") || !unsupported) throw;
             out.attributes["unavailable." + name] = "SAI getter unsupported, status " + std::to_string(e.status);
         }
     }
