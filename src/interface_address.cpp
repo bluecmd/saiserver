@@ -414,7 +414,10 @@ Observation get(sai_object_id_t sw, const std::string& text) {
     return observation(it->second);
 }
 void remove(sai_object_id_t sw, const std::string& text) {
-    Service& s = service(); std::lock_guard<std::mutex> c(s.control); active(s, sw);
+    Service& s = service(); std::lock_guard<std::mutex> c(s.control);
+    // Removal only drops software state, so it stays available after a fault:
+    // otherwise mutation_guard() would lock out topology repair until restart.
+    if (!s.faulted || sw != s.sw) active(s, sw);
     if (!s.records.erase(key(text).key)) fail(SAI_STATUS_ITEM_NOT_FOUND, "interface address not found");
     ++s.generation;
 }

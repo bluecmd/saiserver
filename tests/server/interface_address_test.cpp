@@ -406,7 +406,11 @@ void worker_tests() {
     assert(f.sent.empty() && ia::status().last_status == SAI_STATUS_NOT_SUPPORTED && !ia::status().running);
     error([] { ia::create(sw, attrs(1, "192.0.2.3/24")); }, SAI_STATUS_NOT_SUPPORTED);
     error([] { ia::get(sw, "1001@192.0.2.1/24"); }, SAI_STATUS_NOT_SUPPORTED);
-    error([] { ia::list(sw); }, SAI_STATUS_NOT_SUPPORTED); ia::stop();
+    error([] { ia::list(sw); }, SAI_STATUS_NOT_SUPPORTED);
+    // A fault must not strand addresses: removal still clears them so that
+    // topology mutations are no longer blocked.
+    ia::remove(sw, "1001@192.0.2.1/24"); assert(ia::status().addresses == 0);
+    error([] { ia::remove(sw, "1001@192.0.2.1/24"); }, SAI_STATUS_ITEM_NOT_FOUND); ia::stop();
 }
 void bounded_queue_tests() {
     f.reset(); f.access(1); start(); ia::create(sw, attrs(1)); auto before = ia::status();

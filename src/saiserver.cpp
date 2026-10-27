@@ -489,7 +489,9 @@ int main(int argc, char* argv[]) {
   }
   shutdown_requested.store(true);
   stop_sai_thrift_rpc_server();
-  if (diag_shell_thread.joinable()) diag_shell_thread.join();
+  // The vendor shell may block indefinitely waiting for console input; do not
+  // let it hold up responder and switch teardown.
+  if (diag_shell_thread.joinable()) diag_shell_thread.detach();
   // start() failure already stopped admission and rolled back without starting
   // a worker. Do not automatically retry failed rollback removals on this path.
   if (responder_start_attempted && !responder_started) {

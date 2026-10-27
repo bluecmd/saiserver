@@ -653,7 +653,8 @@ sai_status_t shutdown_switch(sai_object_id_t sw) {
 }
 sai_status_t diagnostic_shell(sai_object_id_t sw) {
     if (bounded.load()) return SAI_STATUS_NOT_SUPPORTED;
-    std::lock_guard<std::mutex> lock(mutex);
+    // No SAI mutex: vendor shells block in this call until the operator exits,
+    // which would stall every RPC behind it.
     auto p = api<sai_switch_api_t>(SAI_API_SWITCH);
     sai_attribute_t a{}; a.id = SAI_SWITCH_ATTR_SWITCH_SHELL_ENABLE; a.value.booldata = true;
     return p->set_switch_attribute ? p->set_switch_attribute(sw, &a) : SAI_STATUS_NOT_SUPPORTED;
