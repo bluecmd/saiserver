@@ -661,6 +661,7 @@ void wire() {
     failcreate = false;
 }
 } // namespace
+extern "C" sai_status_t sai_api_uninitialize() { return SAI_STATUS_SUCCESS; }
 extern "C" sai_status_t sai_api_query(sai_api_t id, void** table) {
     ++queries;
     if (query_status != SAI_STATUS_SUCCESS) return query_status;

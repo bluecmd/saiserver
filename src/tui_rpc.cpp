@@ -4,6 +4,8 @@ extern "C" {
 }
 #include <arpa/inet.h>
 #include <algorithm>
+#include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <functional>
 #include <iomanip>
@@ -17,6 +19,29 @@ namespace tui_rpc {
 namespace {
 using Attrs = std::map<std::string, std::string>;
 std::mutex mutex;
+// Lock order: operation -> responder control -> SAI mutex. Never call the
+// responder (including status/list) while holding the SAI mutex.
+std::mutex operation;
+std::atomic<bool> bounded{false};
+bool ipv6_opt_in = false;
+void mutation_guard() {
+    if (interface_address::status().addresses)
+        throw interface_address::Error(SAI_STATUS_OBJECT_IN_USE,
+            "remove all interface_address objects before SAI topology mutations");
+}
+sai_tui::Object address_object(const interface_address::Observation& obs) {
+    sai_tui::Object out; out.kind = "interface_address"; out.key = obs.key;
+    out.attributes = obs.attributes; return out;
+}
+Attrs backend_attributes() {
+    const auto s = interface_address::status();
+    const bool enabled = s.running && ipv6_opt_in;
+    return {{"preset_api", enabled ? "1" : "0"},
+            {"interface_address_backend", enabled ? "enabled" :
+                (bounded.load() && (!s.running || s.last_status != SAI_STATUS_SUCCESS) ? "failed" : "disabled")},
+            {"interface_address_last_status", std::to_string(s.last_status)},
+            {"interface_address_last_error", s.last_error}};
+}
 // Enumeration hints only: no requested or observed attribute values are cached.
 std::map<uint64_t, std::set<std::pair<std::string, std::string>>> managed;
 [[noreturn]] void fail(sai_status_t status, const std::string& message) {
@@ -587,10 +612,63 @@ sai_tui::Object readback(uint64_t sw, const std::string& kind, const Key& k, con
 }
 } // namespace
 
-void get(sai_tui::Object& out, uint64_t sw, const std::string& kind, const std::string& text) {
-    std::lock_guard<std::mutex> lock(mutex); kindcheck(kind); auto k = key(sw, kind, text); out = observe(sw, kind, k);
+bool bounded_only() noexcept { return bounded.load(); }
+sai_status_t create_switch(sai_object_id_t* sw, uint32_t n, const sai_attribute_t* attrs) {
+    std::lock_guard<std::mutex> lock(mutex);
+    auto p = api<sai_switch_api_t>(SAI_API_SWITCH);
+    return p->create_switch ? p->create_switch(sw, n, attrs) : SAI_STATUS_NOT_SUPPORTED;
 }
-void create(sai_tui::Object& out, uint64_t sw, const std::string& kind, const Attrs& input) {
+void start_interface_addresses(sai_object_id_t sw, const interface_address::Options& options,
+                               const interface_address::Sdk& sdk) {
+    std::lock_guard<std::mutex> serial(operation);
+    if (options.enabled) bounded.store(true);
+    ipv6_opt_in = options.static_ipv6_no_dad;
+    interface_address::start(sw, options, sdk, mutex);
+}
+void stop_interface_addresses() {
+    std::lock_guard<std::mutex> serial(operation);
+    interface_address::stop();
+}
+sai_status_t shutdown_switch(sai_object_id_t sw) {
+    std::lock_guard<std::mutex> lock(mutex);
+    auto p = api<sai_switch_api_t>(SAI_API_SWITCH);
+    // Never clear another consumer's callback. If unsupported, keep our code
+    // resident through switch removal and SDK uninitialization/quiescence.
+    if (bounded.load() && p->get_switch_attribute && p->set_switch_attribute) {
+        sai_attribute_t a{}; a.id = SAI_SWITCH_ATTR_PACKET_EVENT_NOTIFY;
+        const auto observed = p->get_switch_attribute(sw, 1, &a);
+        if (observed != SAI_STATUS_SUCCESS)
+            std::fprintf(stderr, "packet callback getter failed: %d; retaining callback through SDK quiescence\n", observed);
+        if (observed == SAI_STATUS_SUCCESS &&
+            a.value.ptr == reinterpret_cast<sai_pointer_t>(interface_address::packet_callback())) {
+            a.value.ptr = nullptr;
+            auto s = p->set_switch_attribute(sw, &a);
+            if (s != SAI_STATUS_SUCCESS)
+                std::fprintf(stderr, "packet callback unregister failed: %d; retaining callback through SDK quiescence\n", s);
+        }
+    }
+    auto s = p->remove_switch ? p->remove_switch(sw) : SAI_STATUS_NOT_SUPPORTED;
+    if (s != SAI_STATUS_SUCCESS) return s;
+    return sai_api_uninitialize();
+}
+sai_status_t diagnostic_shell(sai_object_id_t sw) {
+    if (bounded.load()) return SAI_STATUS_NOT_SUPPORTED;
+    std::lock_guard<std::mutex> lock(mutex);
+    auto p = api<sai_switch_api_t>(SAI_API_SWITCH);
+    sai_attribute_t a{}; a.id = SAI_SWITCH_ATTR_SWITCH_SHELL_ENABLE; a.value.booldata = true;
+    return p->set_switch_attribute ? p->set_switch_attribute(sw, &a) : SAI_STATUS_NOT_SUPPORTED;
+}
+void get(sai_tui::Object& out, uint64_t sw, const std::string& kind, const std::string& text) try {
+    std::lock_guard<std::mutex> serial(operation);
+    if (kind == "interface_address") { out = address_object(interface_address::get(sw, text)); return; }
+    auto backend = kind == "switch" ? backend_attributes() : Attrs{};
+    std::lock_guard<std::mutex> lock(mutex); kindcheck(kind); auto k = key(sw, kind, text); out = observe(sw, kind, k);
+    out.attributes.insert(backend.begin(), backend.end());
+} catch (const interface_address::Error& e) { fail(e.status, e.what()); }
+void create(sai_tui::Object& out, uint64_t sw, const std::string& kind, const Attrs& input) try {
+    std::lock_guard<std::mutex> serial(operation);
+    if (kind == "interface_address") { out = address_object(interface_address::create(sw, input)); return; }
+    mutation_guard();
     std::lock_guard<std::mutex> lock(mutex);
     Key k; auto attrs = prepare(sw, kind, input, true, k);
     if (kind == "neighbor") k = key(sw, kind, input.at("router_interface") + "@" + input.at("ip"));
@@ -609,8 +687,11 @@ void create(sai_tui::Object& out, uint64_t sw, const std::string& kind, const At
     if (kind != "route" && kind != "neighbor") k.text = hex(k.id);
     managed[sw].insert({kind, k.text});
     out = readback(sw, kind, k, "create");
-}
-void set(sai_tui::Object& out, uint64_t sw, const std::string& kind, const std::string& text, const Attrs& input) {
+} catch (const interface_address::Error& e) { fail(e.status, e.what()); }
+void set(sai_tui::Object& out, uint64_t sw, const std::string& kind, const std::string& text, const Attrs& input) try {
+    std::lock_guard<std::mutex> serial(operation);
+    if (kind == "interface_address") fail(SAI_STATUS_NOT_SUPPORTED, "interface_address is create-only; remove and create instead");
+    mutation_guard();
     std::lock_guard<std::mutex> lock(mutex); kindcheck(kind); auto k = key(sw, kind, text);
     auto attrs = prepare(sw, kind, input, false, k);
     // Own list storage across all writes/readback; never retain caller pointers.
@@ -652,8 +733,11 @@ void set(sai_tui::Object& out, uint64_t sw, const std::string& kind, const std::
         }
     }
     out = readback(sw, kind, k, "set (" + std::to_string(applied) + " attributes)");
-}
-void remove(uint64_t sw, const std::string& kind, const std::string& text) {
+} catch (const interface_address::Error& e) { fail(e.status, e.what()); }
+void remove(uint64_t sw, const std::string& kind, const std::string& text) try {
+    std::lock_guard<std::mutex> serial(operation);
+    if (kind == "interface_address") { interface_address::remove(sw, text); return; }
+    mutation_guard();
     std::lock_guard<std::mutex> lock(mutex); mutablekind(kind, false);
     if (kind == "port") fail(SAI_STATUS_NOT_SUPPORTED, "port removal is outside bounded API");
     auto k = key(sw, kind, text);
@@ -672,9 +756,20 @@ void remove(uint64_t sw, const std::string& kind, const std::string& text) {
     fail(kind == "acl_group" ? SAI_STATUS_NOT_SUPPORTED : SAI_STATUS_FAILURE,
          "remove returned success but object still readable: " + kind + " " + k.text +
          "; absence unverified (SDK may decode stale identity fields); no retry or fabricated success");
-}
+} catch (const interface_address::Error& e) { fail(e.status, e.what()); }
 void snapshot(sai_tui::Inventory& out, uint64_t sw) {
-    std::lock_guard<std::mutex> lock(mutex); out.objects.clear(); out.warnings.clear();
+    std::lock_guard<std::mutex> serial(operation);
+    out.objects.clear(); out.warnings.clear();
+    // list takes the shared SAI lock itself; do not move below lock(mutex).
+    bool inventory_failed = false;
+    try { for (const auto& obs : interface_address::list(sw)) out.objects.push_back(address_object(obs)); }
+    catch (const interface_address::Error& e) {
+        inventory_failed = true;
+        out.warnings.push_back("interface_address inventory failed status " + std::to_string(e.status) + ": " + e.what());
+    }
+    auto backend = backend_attributes();
+    if (inventory_failed) { backend["preset_api"] = "0"; backend["interface_address_backend"] = "failed"; }
+    std::lock_guard<std::mutex> lock(mutex);
     out.warnings.push_back("Enumeration is limited to SAI switch ports/default VLAN/default virtual router/default bridge, their members, reachable 1D bridge RIFs, port egress mirror sessions, and objects created through this service in this server process; non-default VLAN/L3/ACL/mirror objects from other clients or previous processes are not exhaustively discoverable. Default 1Q bridge router ports do not expose individual VLAN RIF OIDs. No persistence.");
     out.warnings.push_back("FDB enumeration is unavailable; use tui_get(fdb, known-key). Notification-derived legacy FDB state is not used as ASIC inventory.");
     std::set<std::pair<std::string, std::string>> seen;
@@ -692,6 +787,8 @@ void snapshot(sai_tui::Inventory& out, uint64_t sw) {
         } catch (const sai_tui::RpcError& e) { out.warnings.push_back("get " + kind + " " + text + " failed status " + std::to_string(e.status) + ": " + e.message); }
     };
     add("switch", hex(sw));
+    for (auto& object : out.objects) if (object.kind == "switch")
+        object.attributes.insert(backend.begin(), backend.end());
     // Discovery must not depend on unrelated switch attributes (e.g. src_mac)
     // being readable. Each default and the port list has its own error boundary.
     auto sk = key(sw, "switch", hex(sw));
@@ -713,6 +810,7 @@ void snapshot(sai_tui::Inventory& out, uint64_t sw) {
     out.warnings.insert(out.warnings.end(), capability_warnings.begin(), capability_warnings.end());
 }
 void port_counters(std::map<std::string, int64_t>& out, uint64_t, const std::string& text) {
+    std::lock_guard<std::mutex> serial(operation);
     std::lock_guard<std::mutex> lock(mutex); auto id = oid(text); out.clear();
     auto p = api<sai_port_api_t>(SAI_API_PORT);
     if (!p->get_port_stats) fail(SAI_STATUS_NOT_SUPPORTED, "port stats API unavailable");

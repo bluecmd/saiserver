@@ -11,6 +11,8 @@ extern "C" {
 
 namespace {
 struct Dispatch {
+    void* handle = nullptr;
+    const char* path = nullptr;
     decltype(&sai_api_initialize) initialize = nullptr;
     decltype(&sai_api_query) query = nullptr;
     decltype(&sai_api_uninitialize) uninitialize = nullptr;
@@ -28,6 +30,7 @@ bool resolve(void* handle, const char* path, const char* name,
     // wrapper as well, in case a malformed SDK resolves back to this executable.
     function = reinterpret_cast<Function>(symbol);
     if (error || !function || function == wrapper) {
+        function = nullptr;
         std::fprintf(stderr,
                      "SAI loader: SAI_LIBRARY_PATH='%s': required symbol %s: %s; "
                      "select a compatible SAI SDK library.\n",
@@ -70,6 +73,10 @@ Dispatch load() noexcept try {
         !resolve(handle, path, "sai_log_set", &sai_log_set, result.log)) {
         return {};
     }
+    result.handle = handle;
+    // getenv storage may change later. Diagnostics need no cached environment
+    // pointer; optional resolution uses this pinned handle, never a new dlopen.
+    result.path = "<already loaded SDK>";
     return result;
 } catch (...) {
     // A C++ DSO constructor may throw during dlopen. Cache that failure too,
@@ -85,6 +92,27 @@ const Dispatch& dispatch() {
     // call, and restart the process to change SDKs or retry a failed load.
     static const Dispatch instance = load();
     return instance;
+}
+
+struct Optional {
+    decltype(&sai_get_object_key) keys = nullptr;
+    decltype(&sai_object_type_query) type = nullptr;
+    decltype(&sai_switch_id_query) switch_id = nullptr;
+    decltype(&sai_query_attribute_enum_values_capability) enums = nullptr;
+};
+const Optional& optional() {
+    // Lazy, sticky and from the SAME SDK: disabled servers need no new symbols.
+    static const Optional value = [] {
+        Optional o;
+        const auto& d = dispatch();
+        if (!d.handle) return o;
+        resolve(d.handle, d.path, "sai_get_object_key", &sai_get_object_key, o.keys);
+        resolve(d.handle, d.path, "sai_object_type_query", &sai_object_type_query, o.type);
+        resolve(d.handle, d.path, "sai_switch_id_query", &sai_switch_id_query, o.switch_id);
+        resolve(d.handle, d.path, "sai_query_attribute_enum_values_capability", &sai_query_attribute_enum_values_capability, o.enums);
+        return o;
+    }();
+    return value;
 }
 
 template <typename Call>
@@ -141,4 +169,29 @@ extern "C" sai_status_t sai_log_set(sai_api_t api, sai_log_level_t log_level) {
     return guarded("sai_log_set", [=](const Dispatch& sdk) {
         return sdk.log ? sdk.log(api, log_level) : SAI_STATUS_FAILURE;
     });
+}
+
+extern "C" sai_status_t sai_get_object_key(sai_object_id_t sw, sai_object_type_t type,
+                                           uint32_t* count, sai_object_key_t* keys) {
+    if (!count || (*count && !keys)) return SAI_STATUS_INVALID_PARAMETER;
+    return guarded("sai_get_object_key", [=](const Dispatch&) {
+        auto f = optional().keys;
+        return f ? f(sw, type, count, keys) : SAI_STATUS_NOT_SUPPORTED;
+    });
+}
+extern "C" sai_status_t sai_query_attribute_enum_values_capability(
+    sai_object_id_t sw, sai_object_type_t type, sai_attr_id_t attr, sai_s32_list_t* values) {
+    if (!values || (values->count && !values->list)) return SAI_STATUS_INVALID_PARAMETER;
+    return guarded("sai_query_attribute_enum_values_capability", [=](const Dispatch&) {
+        auto f = optional().enums;
+        return f ? f(sw, type, attr, values) : SAI_STATUS_NOT_SUPPORTED;
+    });
+}
+extern "C" sai_object_type_t sai_object_type_query(sai_object_id_t id) {
+    try { auto f = optional().type; return f ? f(id) : SAI_OBJECT_TYPE_NULL; }
+    catch (...) { std::fprintf(stderr, "SAI loader: exception in sai_object_type_query\n"); return SAI_OBJECT_TYPE_NULL; }
+}
+extern "C" sai_object_id_t sai_switch_id_query(sai_object_id_t id) {
+    try { auto f = optional().switch_id; return f ? f(id) : SAI_NULL_OBJECT_ID; }
+    catch (...) { std::fprintf(stderr, "SAI loader: exception in sai_switch_id_query\n"); return SAI_NULL_OBJECT_ID; }
 }

@@ -35,6 +35,9 @@
 #include <string>
 #include "switch_sai_rpc.h"
 #include "tui_rpc.h"
+#include "bounded_rpc_processor.h"
+#include <thread>
+#include <condition_variable>
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/server/TSimpleServer.h>
 #include <thrift/transport/TServerSocket.h>
@@ -4150,34 +4153,56 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
     }
 };
 
-static void * switch_sai_thrift_rpc_server_thread(void *arg) {
-  int port = *(int *) arg;
-  shared_ptr<switch_sai_rpcHandler> handler(new switch_sai_rpcHandler());
-  shared_ptr<TProcessor> processor(new switch_sai_rpcProcessor(handler));
-  shared_ptr<TServerTransport> serverTransport(new TServerSocket(port));
-  shared_ptr<TTransportFactory> transportFactory(new TBufferedTransportFactory());
-  shared_ptr<TProtocolFactory> protocolFactory(new TBinaryProtocolFactory());
-
-  TSimpleServer server(processor, serverTransport, transportFactory, protocolFactory);
-  server.serve();
-  return 0;
+namespace {
+std::thread rpc_thread;
+std::shared_ptr<TSimpleServer> rpc_server;
+std::atomic<bool> rpc_accepting{false};
+std::mutex rpc_lifecycle;
+std::condition_variable rpc_ready;
+bool rpc_started = false, rpc_finished = false;
+class ReadyHandler : public TServerEventHandler {
+    void preServe() override {
+        std::lock_guard<std::mutex> lock(rpc_lifecycle);
+        rpc_started = true; rpc_ready.notify_all();
+    }
+};
 }
-
-static pthread_t switch_sai_thrift_rpc_thread;
-
-extern "C" {
-
-  int start_sai_thrift_rpc_server(int port) {
-    static int param = port;
-
-    std::cerr << "Starting SAI RPC server on port " << port << std::endl;
-
-    int rc = pthread_create(&switch_sai_thrift_rpc_thread, NULL, switch_sai_thrift_rpc_server_thread, &param);
-    std::cerr << "create pthread switch_sai_thrift_rpc_server_thread result " << rc << std::endl;
-
-    rc = pthread_detach(switch_sai_thrift_rpc_thread);
-    std::cerr << "detach switch_sai_thrift_rpc_server_thread rc" << rc  << std::endl;
-
-    return rc;
-  }
+extern "C" int start_sai_thrift_rpc_server(int port) {
+    std::unique_lock<std::mutex> lock(rpc_lifecycle);
+    if (rpc_thread.joinable()) return -1;
+    try {
+        auto handler = std::make_shared<switch_sai_rpcHandler>();
+        auto processor = std::make_shared<BoundedRpcProcessor>(handler, rpc_accepting);
+        auto socket = std::make_shared<TServerSocket>(port);
+        // Interrupt idle/persistent clients on stop(), not just the listener.
+        socket->setInterruptableChildren(true);
+        rpc_server = std::make_shared<TSimpleServer>(processor, socket,
+            std::make_shared<TBufferedTransportFactory>(), std::make_shared<TBinaryProtocolFactory>());
+        rpc_server->setServerEventHandler(std::make_shared<ReadyHandler>());
+        rpc_started = rpc_finished = false; rpc_accepting.store(true);
+        rpc_thread = std::thread([] {
+            try { rpc_server->serve(); }
+            catch (const std::exception& e) { std::cerr << "RPC server failed: " << e.what() << std::endl; }
+            catch (...) { std::cerr << "RPC server failed with unknown exception" << std::endl; }
+            rpc_accepting.store(false);
+            std::lock_guard<std::mutex> done(rpc_lifecycle);
+            rpc_finished = true; rpc_ready.notify_all();
+        });
+        rpc_ready.wait(lock, [] { return rpc_started || rpc_finished; });
+        if (rpc_started && !rpc_finished) return 0;
+        lock.unlock(); rpc_thread.join(); rpc_server.reset(); return -1;
+    } catch (const std::exception& e) {
+        rpc_accepting.store(false);
+        std::cerr << "RPC startup failed: " << e.what() << std::endl; return -1;
+    }
 }
+extern "C" void stop_sai_thrift_rpc_server() {
+    // Main-thread lifecycle only. No SAI calls, no signal-handler use.
+    rpc_accepting.store(false);
+    if (rpc_thread.joinable()) {
+        rpc_server->stop();
+        rpc_thread.join(); // all handlers quiesced before responder/SDK teardown
+    }
+    rpc_server.reset();
+}
+extern "C" bool sai_thrift_rpc_server_running() { return rpc_accepting.load(); }

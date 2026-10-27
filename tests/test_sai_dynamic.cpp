@@ -1,5 +1,5 @@
 // Standalone, hardware-free loader tests (no testing framework needed).
-// Usage: test_sai_dynamic <complete-fake-DSO-runfile> <incomplete-fake-DSO-runfile>
+// Usage: test_sai_dynamic <complete-fake-DSO> <incomplete-fake-DSO> [optional-symbol-fake-DSO]
 // The second DSO uses tests/fake_sai.cpp with -DFAKE_SAI_OMIT_LOG_SET.
 // Resolve declared runfiles arguments here; the loader itself accepts ONLY an
 // absolute filename. No test discovers or loads an installed/vendor SDK.
@@ -106,8 +106,8 @@ std::string absolute_runfile(const char* path) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 3) {
-        std::fprintf(stderr, "Usage: %s <complete-fake-DSO> <fake-DSO-built-with-FAKE_SAI_OMIT_LOG_SET>\n", argv[0]);
+    if (argc != 3 && argc != 4) {
+        std::fprintf(stderr, "Usage: %s <complete-fake-DSO> <fake-DSO-built-with-FAKE_SAI_OMIT_LOG_SET> [optional-symbol-fake-DSO]\n", argv[0]);
         return 2;
     }
     const std::string complete = absolute_runfile(argv[1]);
@@ -232,6 +232,44 @@ int main(int argc, char** argv) {
         CHECK(successes == 1 && initialize_calls == count && next_calls == count);
         CHECK(sai_api_uninitialize() == SAI_STATUS_SUCCESS);
     });
+
+    run_case("optional symbols absent do not poison required dispatch", [&] {
+        select(complete);
+        uint32_t count = 0; sai_s32_list_t values{};
+        CHECK(sai_get_object_key(kVersion, SAI_OBJECT_TYPE_HOSTIF_TRAP, &count, nullptr) == SAI_STATUS_NOT_SUPPORTED);
+        CHECK(sai_query_attribute_enum_values_capability(kVersion, SAI_OBJECT_TYPE_HOSTIF_PACKET,
+              SAI_HOSTIF_PACKET_ATTR_HOSTIF_TX_TYPE, &values) == SAI_STATUS_NOT_SUPPORTED);
+        CHECK(sai_object_type_query(kVersion) == SAI_OBJECT_TYPE_NULL);
+        CHECK(sai_switch_id_query(kVersion) == SAI_NULL_OBJECT_ID);
+        sai_api_version_t version = 0;
+        CHECK(sai_query_api_version(&version) == SAI_STATUS_SUCCESS && version == kVersion);
+    }, "sai_get_object_key");
+    if (argc == 4) {
+        const std::string optional = absolute_runfile(argv[3]);
+        run_case("optional forwarding, buffers, identity, exceptions and pinned SDK", [&] {
+            select(optional);
+            uint32_t count = 0; sai_object_key_t key{};
+            CHECK(sai_get_object_key(kVersion, SAI_OBJECT_TYPE_HOSTIF_TRAP, &count, nullptr) == SAI_STATUS_BUFFER_OVERFLOW && count == 1);
+            CHECK(sai_get_object_key(kVersion, SAI_OBJECT_TYPE_HOSTIF_TRAP, &count, &key) == SAI_STATUS_SUCCESS);
+            CHECK(key.key.object_id == kVersion + 1);
+            CHECK(sai_object_type_query(key.key.object_id) == SAI_OBJECT_TYPE_HOSTIF_TRAP);
+            CHECK(sai_switch_id_query(key.key.object_id) == kVersion);
+            sai_s32_list_t values{}; int32_t value = -1;
+            CHECK(sai_query_attribute_enum_values_capability(kVersion, SAI_OBJECT_TYPE_HOSTIF_PACKET,
+                  SAI_HOSTIF_PACKET_ATTR_HOSTIF_TX_TYPE, &values) == SAI_STATUS_BUFFER_OVERFLOW && values.count == 1);
+            values.list = &value;
+            CHECK(sai_query_attribute_enum_values_capability(kVersion, SAI_OBJECT_TYPE_HOSTIF_PACKET,
+                  SAI_HOSTIF_PACKET_ATTR_HOSTIF_TX_TYPE, &values) == SAI_STATUS_SUCCESS && value == SAI_HOSTIF_TX_TYPE_PIPELINE_BYPASS);
+            CHECK(sai_get_object_key(42, SAI_OBJECT_TYPE_HOSTIF_TRAP, &count, &key) == SAI_STATUS_FAILURE);
+            CHECK(sai_object_type_query(42) == SAI_OBJECT_TYPE_NULL && sai_switch_id_query(42) == SAI_NULL_OBJECT_ID);
+            CHECK(sai_query_attribute_enum_values_capability(42, SAI_OBJECT_TYPE_HOSTIF_PACKET,
+                  SAI_HOSTIF_PACKET_ATTR_HOSTIF_TX_TYPE, &values) == SAI_STATUS_FAILURE);
+            CHECK(sai_get_object_key(kVersion, SAI_OBJECT_TYPE_HOSTIF_TRAP, nullptr, nullptr) == SAI_STATUS_INVALID_PARAMETER);
+            CHECK(sai_query_attribute_enum_values_capability(kVersion, SAI_OBJECT_TYPE_HOSTIF_PACKET, 0, nullptr) == SAI_STATUS_INVALID_PARAMETER);
+            select(complete); // Never resolve against a different library after env changes.
+            CHECK(sai_switch_id_query(kVersion + 1) == kVersion);
+        });
+    }
 
     CHECK(unlink(invalid.c_str()) == 0);
     CHECK(rmdir(directory.c_str()) == 0);

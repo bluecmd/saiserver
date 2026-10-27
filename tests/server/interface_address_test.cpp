@@ -444,4 +444,5 @@ void bounded_queue_tests() {
 int main() {
     packet_tests(); setup_tests(); address_tests(); worker_tests(); bounded_queue_tests(); ia::stop();
     std::cout << "interface_address: pure packet + fake SAI lifecycle/ownership/topology/worker/bounds tests passed\n";
+    return 0;
 }

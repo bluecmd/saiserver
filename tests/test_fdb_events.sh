@@ -8,7 +8,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 "$THRIFT" -out "$tmp" --gen cpp -r src/switch_sai.thrift
 flags=(-std=c++11 -Wall -Wextra -ffunction-sections -fdata-sections
-       -I"$SAI_HEADER_DIR" -I"$SAI_HEADER_DIR/experimental" -I"$tmp" -Isrc)
+       -I"$SAI_HEADER_DIR" -I"$SAI_HEADER_DIR/experimental" -I"$SAI_HEADER_DIR/../experimental" -I"$tmp" -Isrc ${EXTRA_CPPFLAGS:-})
 "$CXX" "${flags[@]}" -Dmain=saiserver_unused_main -c src/saiserver.cpp -o "$tmp/server.o"
 "$CXX" "${flags[@]}" tests/test_fdb_events.cpp "$tmp/server.o" -Wl,--gc-sections -pthread -o "$tmp/test-fdb"
 "$tmp/test-fdb"

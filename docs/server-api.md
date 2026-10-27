@@ -3,14 +3,15 @@
 The `SaiTui` service in `src/sai_tui.thrift` is inherited by the legacy
 `switch_sai_rpc` service. Both use the existing binary/buffered Thrift endpoint
 (default TCP 9090). The wire contract is [tui-api.md](tui-api.md). Existing
-legacy method signatures remain available; the bounded methods come from the
-small inherited IDL.
+legacy method signatures remain available in default mode; the bounded methods
+come from the small inherited IDL. Explicit `--interface-address` mode rejects
+**all legacy RPCs**, including legacy getters, before handler dispatch.
 
 **No authentication or authorization is added. Use localhost/an SSH tunnel on
 an isolated lab.** This is an explicit management API, not a reconciliation
 controller: no polling-triggered mutations, automatic retries, rollback,
 port-mode workflows, or counter clearing are performed. The legacy API remains
-available and retains its existing behavior; the bounded API never invokes its
+available in default/off mode and retains its existing behavior; the bounded API never invokes its
 parsers or uses its notification-derived state as getter readback.
 
 ## Methods and error behavior
@@ -55,7 +56,126 @@ mutation failure remains the RPC status. Inspect with `tui_get` before deciding
 what to do; **do not blindly retry**.
 
 All bounded calls are serialized against other bounded calls by a process mutex.
-This is not a cross-client hardware transaction or a lock for the legacy API.
+With the interface-address responder enabled, SAI access additionally shares its
+read/validate/TX mutex. Legacy RPCs and the vendor diagnostic shell are disabled
+in that mode, including after responder faults. This is not a transaction or a
+lock against an external SDK client/process.
+
+## Operational interface-address responder (explicit opt-in)
+
+Default is **off**. The standalone Makefile build uses `src/sai_dynamic.cpp`;
+set `SAI_LIBRARY_PATH` to an absolute SDK DSO filename at deployment, before the
+first SAI call. No vendor library is needed to build. Required legacy entrypoints
+retain their checked, sticky dispatch. Optional `sai_get_object_key`,
+`sai_object_type_query`, `sai_switch_id_query`, and
+`sai_query_attribute_enum_values_capability` wrappers resolve lazily from the
+**same pinned SDK handle**. Missing optional entrypoints do not prevent disabled
+mode startup; enabled startup fails closed rather than inventing capabilities.
+
+Explicit startup example (not a hardware validation recipe):
+
+```text
+saiserver --profile sai.profile --interface-address \
+  --interface-address-static-ipv6-no-dad \
+  --interface-address-allow-unpoliced-cpu
+```
+
+Alternatively replace `--interface-address-allow-unpoliced-cpu` with
+`--interface-address-policer <nonzero-OID>`. The supplied policer must be an
+existing same-switch SAI policer; it is borrowed, attached to the owned trap
+group, and never changed or removed. Its configuration/effectiveness remains the
+operator's responsibility. No policer is automatically created. Without one,
+the explicit acknowledgement means **software-only admission, NO ASIC CPU
+policer or SDK/ASIC delivery-rate guarantee**: 100 admitted packets/second,
+64 queued packets, 2048 bytes/packet, at most 16 callback attributes and 256
+addresses. Queue contention can drop packets.
+
+`--interface-address-static-ipv6-no-dad` acknowledges **STATIC IPv6, NO DAD**:
+the operator must guarantee address uniqueness. It is required for CLI enable,
+even for an initially IPv4-only inventory. The backend also independently rejects
+IPv6 creates without it. Incoming DAD solicitations are answered correctly; this
+does not mean the configured address performed DAD. Acknowledgement/policer flags
+without `--interface-address` are errors. Enabled mode forces the diagnostic
+shell off (no alternate topology mutation path).
+
+Before `create_switch`, the server installs `SAI_SWITCH_ATTR_PACKET_EVENT_NOTIFY`
+in the create attributes. Before starting RPC admission, the backend reads it
+back, checks identity, getters, trap enumeration and CB/COPY/bypass enum
+capabilities, refuses conflicting existing ARP/ND traps, and creates only its
+own trap group, two COPY traps and per-trap callback tables. A failure aborts
+startup; no RPC listener is started and no preset can be applied.
+
+Use the existing bounded methods with kind `interface_address`:
+
+```text
+tui_create("interface_address", {
+  "router_interface": "0x3e9",
+  "ingress_port": "0xc9",
+  "address": "192.0.2.1/24"
+})
+# canonical key: 0x3e9@192.0.2.1/24 (NOT 192.0.2.0/24)
+tui_get("interface_address", "0x3e9@192.0.2.1/24")
+tui_remove("interface_address", "0x3e9@192.0.2.1/24")
+```
+
+The three create fields are exact and create-only. Unknown/missing fields fail;
+`tui_set` is unsupported. IPv6 host CIDRs are canonicalized without masking, e.g.
+`0x3e9@2001:db8::1234/64`. Create/get/snapshot report actual service inventory and
+revalidate SAI attachment/MAC, not fabricated SAI address-object readback.
+Additional fields are read-only: `state=configured`,
+`observation_source=software-responder`, the verified RIF `mac`,
+`dad=static-no-dad` for IPv6 (`not-applicable` for IPv4), and
+`neighbor_learning=unsupported`. Remove deletes the actual service registration.
+There is no persistent registry and no OS address/interface/route configuration.
+
+Supported attachment is a direct physical routed RIF or a VLAN RIF with exactly
+one untagged physical bridge-port member and matching port PVID. LAGs, subports,
+trunks, ambiguous ingress mappings and stale attachments fail closed. All bounded
+SAI create/set/remove calls are conservatively rejected with `OBJECT_IN_USE`
+while any interface address exists: remove addresses first, then change topology,
+then recreate addresses. Responder validation and TX share the SAI mutex; each
+packet revalidates attachment/MAC before transmission. Interface-address dispatch
+and snapshot inventory run **outside** that mutex to avoid self-deadlock.
+
+This sends real software ARP replies and IPv6 Neighbor Advertisements through
+SAI hostif pipeline-bypass TX. It does **not** implement dynamic neighbor learning,
+ICMP echo, connected routes, FDB programming, or neighbor-object creation. Only
+untagged Ethernet is accepted; IPv6 extensions/fragments and oversized packets
+are rejected. Runtime SDK errors fault the service and subsequent CRUD/inventory
+reports the original error. Stale attachments are suppressed, not remapped.
+
+Switch snapshot advertises `preset_api=1` and
+`interface_address_backend=enabled` **only** when the responder is running, IPv6
+opt-in is present, and service inventory validation succeeds. Otherwise it reports
+`preset_api=0` and `disabled`/`failed`, with warnings and actual last-status/error
+where available. These are software capabilities, **never hardware-verified
+claims**. Physical SDK CB delivery and preservation of the complete Ethernet
+header/**all VLAN tags remain unverified**. An SDK which strips or rewrites tags
+is unsupported: software cannot prove ingress scope. Fake tests do not establish
+physical CB/COPY/bypass behavior or ASIC policer effectiveness.
+
+SIGINT/SIGTERM are blocked before spawning threads and consumed by the main
+thread, not an async handler. SDK shutdown callbacks only request shutdown.
+Shutdown closes RPC admission, interrupts listener/client reads and joins the RPC
+thread, joins the responder and removes only owned traps/tables/group. Cleanup
+failure retains residual IDs/status and a failing process exit; it is not hidden
+by later successful SDK teardown. No responder/RPC thread is detached. Callback
+unregistration clears only our own callback, under the shared SAI lock; unsupported
+unregistration leaves code resident through switch removal/API uninitialization.
+The SDK remains pinned. Failed startup rollback is not automatically retried by
+shutdown; its residual IDs are logged before SDK teardown. If SDK quiescence fails,
+process termination skips static
+destruction to keep callback state alive until OS exit. There are no automatic
+CRUD retries. The legacy diagnostic shell, when used in default/off mode, must
+return from its SDK call before its thread can be joined.
+
+Local verification: `tests/server/run.sh` covers bounded RPC CRUD/snapshot,
+memory-buffer legacy rejection, real software ARP/ND against fake SAI, production
+CLI/startup callback ordering and teardown with a fake listener (no socket).
+`tests/server/interface_address_run.sh` covers the packet/backend seams;
+`tests/server/dynamic_run.sh` builds fake DSOs to test both optional dispatch and
+SDKs missing the new symbols. Physical RPC listener interruption and hardware
+receive/TX have not been exercised by these tests.
 
 ## Input and representation
 
@@ -66,9 +186,11 @@ This is not a cross-client hardware transaction or a lock for the legacy API.
   Null is accepted only for ACL bindings and a route's `next_hop` (`0x0`).
 - Neighbor key: `<rif-oid>@<IPv4-or-IPv6>`.
 - Route key: `<vr-oid>@<IPv4-or-IPv6-CIDR>`.
+- Interface-address key: `<rif-oid>@<host-IP/prefix>`; **host bits are preserved**.
 - FDB key: `<vlan-or-bridge-oid>@<mac>`.
 - IPs use strict `inet_pton` parsing. CIDRs require a decimal prefix length
-  (`0..32` or `0..128`); host bits are masked out. IPv6 output is canonicalized
+  (`0..32` or `0..128`); route host bits are masked out, but interface-address
+  host bits are never masked. IPv6 output is canonicalized
   by `inet_ntop`. Embedded NULs are rejected.
 - MACs require six colon-separated, two-hex-digit octets; output is lowercase.
 - Booleans are exactly `true`/`false`. Integers are unsigned decimal; priority
@@ -96,6 +218,7 @@ read-only. All supplied immutable fields on set are rejected, even if unchanged.
 | `vlan_member` | `vlan`, `bridge_port`, `tagging` | — | `tagging` | — |
 | `virtual_router` | none | `ipv4` (true), `ipv6` (true) | `ipv4`, `ipv6` | — |
 | `router_interface` | `virtual_router`, exactly one of `port`/`vlan` | `src_mac`, `mtu`, `ipv4`, `ipv6` | `src_mac`, `mtu`, `ipv4`, `ipv6` | `type`; only applicable `port` or `vlan` |
+| `interface_address` | exactly `router_interface`, `ingress_port`, `address` (HOSTCIDR) | none | none; remove/create | `mac`, `state`, `observation_source`, `dad`, `neighbor_learning` (software observations; see below) |
 | `next_hop` | `router_interface`, `ip` | — | none | `type` (IP next hops only) |
 | `neighbor` | `router_interface`, `ip`, `mac` | — | `mac` | canonical key identity fields |
 | `route` | `virtual_router`, `prefix`, `next_hop` | `action` (forward) | `next_hop`, `action` | canonical key identity fields |
@@ -293,7 +416,9 @@ never attribute values. Failed per-object reads become warnings; no partially
 filled object is emitted. Duplicate discovered/managed keys are suppressed.
 
 `switch` is read-only with `default_vlan`, `default_virtual_router`,
-`default_bridge`, `src_mac`. Additional read-only `bridge` objects have `type`
+`default_bridge`, `src_mac`, plus software capability/status attributes
+`preset_api`, `interface_address_backend`, `interface_address_last_status`, and
+`interface_address_last_error` (see below). Additional read-only `bridge` objects have `type`
 and `ports`. `fdb` is read-only with `bridge_port`, `mac`, `vlan` (bridge/VLAN OID)
 and `type`; known-key getters use the SAI FDB API.
 
