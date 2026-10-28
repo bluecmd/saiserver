@@ -105,13 +105,6 @@ cc_test(
     copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
 )
 
-cc_test(
-    name = "generated_bindings_test",
-    srcs = ["test_generated_bindings.cpp"],
-    data = ["//idl:sai_tui_rust_codegen", "//tui:src/sai_tui.rs"],
-    args = ["$(rootpath //idl:sai_tui_rust_codegen)", "$(rootpath //tui:src/sai_tui.rs)"],
-)
-
 sh_test(
     name = "bazelw_test",
     srcs = ["test_bazelw.sh"],
@@ -128,7 +121,6 @@ test_suite(
         ":startup_test",
         ":fdb_events_test",
         ":sai_dynamic_test",
-        ":generated_bindings_test",
         ":bazelw_test",
     ],
 )

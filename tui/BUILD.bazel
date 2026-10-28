@@ -1,3 +1,4 @@
+load("@aspect_bazel_lib//lib:write_source_files.bzl", "write_source_files")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
 
 package(default_visibility = ["//visibility:public"])
@@ -13,11 +14,17 @@ exports_files([
     "Cargo.Bazel.lock",
     "Cargo.lock",
     "Cargo.toml",
-    "src/sai_tui.rs",
 ])
 
-# Keep the existing client on its checked-in bindings. The separately generated
-# RPC crate, //idl:sai_tui_rust, is deliberately independent of it.
+# Cargo builds need the RPC module checked in. Its test fails if it drifts from
+# the pinned compiler's output; `bazel run //tui:update_bindings` rewrites it.
+write_source_files(
+    name = "update_bindings",
+    files = {"src/sai_tui.rs": "//idl:sai_tui_rust_codegen"},
+)
+
+# The client uses the checked-in module. The separately generated RPC crate,
+# //idl:sai_tui_rust, is deliberately independent of it.
 rust_library(
     name = "sai_tui",
     srcs = glob(
@@ -107,5 +114,6 @@ test_suite(
         ":config_apply_test",
         ":safety_test",
         ":unit_tests",
+        ":update_bindings_test",
     ],
 )

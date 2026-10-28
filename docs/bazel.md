@@ -107,9 +107,12 @@ same version can have a different Rust crate identity and incompatible traits.
 The downstream test performs real in-memory serialization and constructs a
 generated service client using the exported runtime.
 
-The client keeps its Cargo-compatible checked-in RPC module. The
-`generated_bindings_test` compares it byte-for-byte with the pinned compiler's
-output, allowing only the two documented lint/rustfmt attributes. The standalone
+The client keeps its Cargo-compatible checked-in RPC module,
+`tui/src/sai_tui.rs`. `//tui:update_bindings_test` requires it to be
+byte-identical to the pinned compiler's output; after changing the IDL, run
+`bazel run //tui:update_bindings` (natively: `bazelw` mounts the checkout
+read-only) to rewrite it. Lint and rustfmt exemptions live on the `mod`
+declaration in `lib.rs`, not in the generated file. The standalone
 `sai_tui_rpc` crate is useful without pulling in Ratatui. Its types and the
 client's nested `sai_tui::sai_tui` module are separate Rust types; use the
 matching module when passing objects to the client API.

@@ -13,6 +13,7 @@ bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "toolchains_llvm_bootstrapped", version = "0.5.9")
 bazel_dep(name = "boost.uuid", version = "1.89.0.bcr.2")
 bazel_dep(name = "boost.predef", version = "1.89.0.bcr.2")
+bazel_dep(name = "aspect_bazel_lib", version = "2.19.3")
 
 # Includes LLVM, linker, libc headers/CRTs, C++ standard library and runtimes.
 # Never auto-detect a host compiler or /usr/include.
