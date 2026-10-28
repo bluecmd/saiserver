@@ -267,6 +267,10 @@ void crud() {
     for (const char* address : {"192.0.2.1", "2001:0db8::1"}) {
         auto n = make("neighbor", {{"router_interface", rif.key}, {"ip", address}, {"mac", "aa:bb:cc:dd:ee:ff"}});
         tui_rpc::set(o, 1, "neighbor", n.key, {{"mac", "00:01:02:03:04:05"}}); assert(o.attributes.at("mac") == "00:01:02:03:04:05");
+        // With its only field unreadable, nothing shows the entry exists.
+        failget = SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS;
+        error([&] { tui_rpc::get(o, 1, "neighbor", n.key); }, SAI_STATUS_NOT_SUPPORTED);
+        failget = UINT32_MAX;
         tui_rpc::remove(1, "neighbor", n.key);
     }
     for (const char* cidr : {"192.0.2.99/24", "2001:db8::999/64", "::1/0", "192.0.2.1/32"}) {
@@ -346,14 +350,30 @@ void preset_mirrors() {
     for (const char* name : {"type", "encap_type", "ip_version", "gre_protocol", "vlan_header_valid", "monitor_portlist_valid"})
         error([&] { tui_rpc::set(o, 1, "mirror_session", m.key, {{name, "1"}}); }, SAI_STATUS_INVALID_PARAMETER);
     assert(queries == before);
+    // The session profile identifies a supported ERSPAN session: always required.
     for (auto attr : {SAI_MIRROR_SESSION_ATTR_TYPE, SAI_MIRROR_SESSION_ATTR_ERSPAN_ENCAPSULATION_TYPE,
             SAI_MIRROR_SESSION_ATTR_IPHDR_VERSION, SAI_MIRROR_SESSION_ATTR_GRE_PROTOCOL_TYPE,
-            SAI_MIRROR_SESSION_ATTR_VLAN_HEADER_VALID, SAI_MIRROR_SESSION_ATTR_MONITOR_PORTLIST_VALID,
-            SAI_MIRROR_SESSION_ATTR_MONITOR_PORT, SAI_MIRROR_SESSION_ATTR_SRC_IP_ADDRESS, SAI_MIRROR_SESSION_ATTR_DST_IP_ADDRESS,
-            SAI_MIRROR_SESSION_ATTR_SRC_MAC_ADDRESS, SAI_MIRROR_SESSION_ATTR_DST_MAC_ADDRESS, SAI_MIRROR_SESSION_ATTR_TTL, SAI_MIRROR_SESSION_ATTR_TOS}) {
+            SAI_MIRROR_SESSION_ATTR_VLAN_HEADER_VALID, SAI_MIRROR_SESSION_ATTR_MONITOR_PORTLIST_VALID}) {
         failget = attr; failget_status = SAI_STATUS_ATTR_NOT_IMPLEMENTED_0;
         error([&] { tui_rpc::get(o, 1, "mirror_session", m.key); }, SAI_STATUS_ATTR_NOT_IMPLEMENTED_0);
     }
+    // An unreadable writable field is reported, never invented, and must be
+    // readable after it is written; writes of other fields still verify.
+    const std::pair<sai_attr_id_t, const char*> writable[] = {
+        {SAI_MIRROR_SESSION_ATTR_MONITOR_PORT, "monitor_port"}, {SAI_MIRROR_SESSION_ATTR_SRC_IP_ADDRESS, "src_ip"},
+        {SAI_MIRROR_SESSION_ATTR_DST_IP_ADDRESS, "dst_ip"}, {SAI_MIRROR_SESSION_ATTR_SRC_MAC_ADDRESS, "src_mac"},
+        {SAI_MIRROR_SESSION_ATTR_DST_MAC_ADDRESS, "dst_mac"}, {SAI_MIRROR_SESSION_ATTR_TTL, "ttl"},
+        {SAI_MIRROR_SESSION_ATTR_TOS, "tos"}};
+    for (const auto& field : writable) {
+        failget = field.first; failget_status = SAI_STATUS_ATTR_NOT_IMPLEMENTED_0;
+        tui_rpc::get(o, 1, "mirror_session", m.key);
+        assert(!o.attributes.count(field.second) && o.attributes.count(std::string("unavailable.") + field.second));
+        const std::string other = std::string(field.second) == "ttl" ? "tos" : "ttl";
+        tui_rpc::set(o, 1, "mirror_session", m.key, {{other, other == "ttl" ? "64" : "0"}});
+        assert(o.attributes.count(std::string("unavailable.") + field.second));
+    }
+    failget = SAI_MIRROR_SESSION_ATTR_TTL;
+    error([&] { tui_rpc::set(o, 1, "mirror_session", m.key, {{"ttl", "64"}}); }, SAI_STATUS_ATTR_NOT_IMPLEMENTED_0, "READBACK FAILED");
     failget = UINT32_MAX; failget_status = SAI_STATUS_NOT_SUPPORTED;
     for (auto attr : {SAI_MIRROR_SESSION_ATTR_TYPE, SAI_MIRROR_SESSION_ATTR_ERSPAN_ENCAPSULATION_TYPE,
             SAI_MIRROR_SESSION_ATTR_IPHDR_VERSION, SAI_MIRROR_SESSION_ATTR_GRE_PROTOCOL_TYPE,
@@ -388,9 +408,14 @@ void preset_mirrors() {
     for (auto expected : {id, external, failedid}) {
         assert(std::count_if(inv.objects.begin(), inv.objects.end(), [&](const sai_tui::Object& x) { return x.kind == "mirror_session" && x.key == h(expected); }) == 1);
     }
-    failget = SAI_MIRROR_SESSION_ATTR_TTL; tui_rpc::snapshot(inv, 1);
+    // An unsupported getter keeps sessions visible, flagged and warned about.
+    failget = SAI_MIRROR_SESSION_ATTR_TTL; failget_status = SAI_STATUS_NOT_SUPPORTED; tui_rpc::snapshot(inv, 1);
+    assert(std::count_if(inv.objects.begin(), inv.objects.end(), [](const sai_tui::Object& x) { return x.kind == "mirror_session" && x.attributes.count("unavailable.ttl"); }) == 3);
+    assert(std::any_of(inv.warnings.begin(), inv.warnings.end(), [](const std::string& w) { return w.find("mirror_session.ttl") == 0; }));
+    // Any other getter failure still hides the object behind a warning.
+    failget_status = SAI_STATUS_FAILURE; tui_rpc::snapshot(inv, 1);
     assert(std::none_of(inv.objects.begin(), inv.objects.end(), [](const sai_tui::Object& x) { return x.kind == "mirror_session"; }));
-    assert(inv.warnings.size() >= 5); failget = UINT32_MAX;
+    assert(inv.warnings.size() >= 5); failget = UINT32_MAX; failget_status = SAI_STATUS_NOT_SUPPORTED;
     before = queries;
     for (const char* list : {"0", "1,", ",1", "1,,2", "1, 2", "1,0x1", "-1", "0xg"})
         error([&] { tui_rpc::set(o, 1, "port", "5", {{"admin", "true"}, {"egress_mirror_sessions", list}}); }, SAI_STATUS_INVALID_PARAMETER);
@@ -582,12 +607,19 @@ void failures() {
     auto reads_before_partial = gets;
     error([&] { tui_rpc::set(o, 1, "port", "5", {{"admin", "false"}, {"pvid", "100"}}); }, SAI_STATUS_OBJECT_IN_USE, "partial readback observed");
     assert(gets > reads_before_partial);
+    // An unwritten field with an unsupported getter does not void the readback;
+    // any other getter failure does.
     failwrite = writes + 2; failget = SAI_PORT_ATTR_SPEED;
+    error([&] { tui_rpc::set(o, 1, "port", "5", {{"admin", "false"}, {"pvid", "100"}}); }, SAI_STATUS_OBJECT_IN_USE, "unavailable.speed=SAI getter unsupported");
+    failwrite = writes + 2; failget_status = SAI_STATUS_FAILURE;
     error([&] { tui_rpc::set(o, 1, "port", "5", {{"admin", "false"}, {"pvid", "100"}}); }, SAI_STATUS_OBJECT_IN_USE, "PARTIAL READBACK FAILED");
+    failget_status = SAI_STATUS_NOT_SUPPORTED;
     failwrite = 0; failget = UINT32_MAX;
     tui_rpc::get(o, 1, "port", "5"); assert(o.attributes.at("admin") == "false");
     failget = SAI_PORT_ATTR_SPEED;
-    error([&] { tui_rpc::set(o, 1, "port", "5", {{"admin", "true"}}); }, SAI_STATUS_NOT_SUPPORTED, "READBACK FAILED");
+    tui_rpc::set(o, 1, "port", "5", {{"admin", "true"}});
+    assert(o.attributes.at("admin") == "true" && o.attributes.count("unavailable.speed"));
+    error([&] { tui_rpc::set(o, 1, "port", "5", {{"speed", "100000"}}); }, SAI_STATUS_NOT_SUPPORTED, "READBACK FAILED");
     failget = UINT32_MAX;
     failget = SAI_PORT_ATTR_INGRESS_ACL;
     tui_rpc::get(o, 1, "port", "5");

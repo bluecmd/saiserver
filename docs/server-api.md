@@ -55,6 +55,16 @@ message includes `PARTIAL READBACK FAILED` and the getter status. The original
 mutation failure remains the RPC status. Inspect with `tui_get` before deciding
 what to do; **do not blindly retry**.
 
+Some SDKs cannot read every attribute: SONiC's virtual switch, for example,
+returns `NOT_IMPLEMENTED` for attributes left at their SAI defaults. Such a
+getter (`NOT_SUPPORTED`, `NOT_IMPLEMENTED` or their indexed attribute forms) on
+a **writable** attribute is reported as `unavailable.<name>` with the original
+status, plus an inventory warning, instead of hiding the whole object. It is
+never treated as verified. Getter failures stay fatal for attributes the
+current mutation wrote (`READBACK FAILED`), for create-only attributes that
+identify the object (e.g. the mirror session profile, an ACL entry's table),
+for any other status, and when no attribute of the object is readable at all.
+
 All bounded calls are serialized against other bounded calls by a process mutex.
 With the interface-address responder enabled, SAI access additionally shares its
 read/validate/TX mutex. Legacy RPCs and the vendor diagnostic shell are disabled

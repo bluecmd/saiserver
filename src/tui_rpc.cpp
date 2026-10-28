@@ -11,6 +11,7 @@ extern "C" {
 #include <iomanip>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <vector>
@@ -377,7 +378,12 @@ void mirror_profile(const Key& k, Attrs* out = nullptr) {
         (*out)["vlan_header_valid"] = boolean(vlan); (*out)["monitor_portlist_valid"] = boolean(ports);
     }
 }
-sai_tui::Object observe(uint64_t sw, const std::string& kind, const Key& k) {
+// Reads an object's actual SAI state. A writable attribute whose getter is
+// unsupported (e.g. SONiC's libsaivs for attributes left at their defaults) is
+// reported as "unavailable.<name>" instead of failing the whole object, unless
+// the current mutation wrote it: what was written must be read back. Create-only
+// attributes identify the object and must always be readable.
+sai_tui::Object observe(uint64_t sw, const std::string& kind, const Key& k, const std::set<std::string>& written = {}) {
     sai_tui::Object out; out.kind = kind; out.key = k.text;
     auto fs = fields(kind);
     if (kind == "mirror_session") mirror_profile(k, &out.attributes);
@@ -405,25 +411,37 @@ sai_tui::Object observe(uint64_t sw, const std::string& kind, const Key& k) {
         type = read(kind, k, SAI_NEXT_HOP_ATTR_TYPE).value.s32; out.attributes["type"] = std::to_string(type);
         if (type != SAI_NEXT_HOP_TYPE_IP) fail(SAI_STATUS_NOT_SUPPORTED, "only IP next hops are supported");
     }
+    unsigned readable = 0, unavailable = 0;
+    std::optional<sai_tui::RpcError> first_unavailable;
     for (auto& f : fs) {
         std::string name = f.name;
         if (kind == "acl_table" && (name == "src_mac_enabled" || name == "l4_dst_port_enabled")) continue; // Read once with family below.
         if (kind == "router_interface" && ((name == "port" && type != SAI_ROUTER_INTERFACE_TYPE_PORT) || (name == "vlan" && type != SAI_ROUTER_INTERFACE_TYPE_VLAN) || (name == "src_mac" && type == SAI_ROUTER_INTERFACE_TYPE_LOOPBACK))) continue;
         if (kind == "bridge_port" && name == "port" && type != SAI_BRIDGE_PORT_TYPE_PORT && type != SAI_BRIDGE_PORT_TYPE_SUB_PORT) continue;
         if (kind == "bridge_port" && name == "bridge" && (type == SAI_BRIDGE_PORT_TYPE_PORT || type == SAI_BRIDGE_PORT_TYPE_1Q_ROUTER)) continue;
+        sai_attribute_t value;
         try {
-            out.attributes[name] = decode(f, read(kind, k, f.id));
+            value = read(kind, k, f.id);
         } catch (const sai_tui::RpcError& e) {
-            // Some SDKs implement binding writes but not port ACL getters.
-            // Keep ports visible, but never invent a cached binding value.
             const bool unsupported = e.status == SAI_STATUS_NOT_SUPPORTED ||
                 e.status == SAI_STATUS_NOT_IMPLEMENTED ||
                 SAI_STATUS_IS_ATTR_NOT_IMPLEMENTED(e.status) ||
                 SAI_STATUS_IS_ATTR_NOT_SUPPORTED(e.status);
-            if (kind != "port" || (name != "ingress_acl" && name != "egress_acl" && name != "drop_tagged" && name != "drop_untagged") || !unsupported) throw;
+            // Some SDKs implement port binding writes but not their getters; those
+            // stay unavailable even after a write (the client reports the mismatch).
+            const bool port_binding = kind == "port" && (name == "ingress_acl" || name == "egress_acl" || name == "drop_tagged" || name == "drop_untagged");
+            if (!unsupported || (!port_binding && (!f.writable || written.count(name)))) throw;
+            if (!unavailable) first_unavailable = e;
+            ++unavailable;
             out.attributes["unavailable." + name] = "SAI getter unsupported, status " + std::to_string(e.status);
+            continue;
         }
+        // A readable but unsupported value (e.g. an IPv6 session) is an error.
+        out.attributes[name] = decode(f, value);
+        ++readable;
     }
+    // Nothing readable is no evidence that the object exists.
+    if (unavailable && !readable) throw *first_unavailable;
     if (kind == "neighbor") { out.attributes["router_interface"] = hex(k.neighbor.rif_id); out.attributes["ip"] = iptext(k.neighbor.ip_address); }
     if (kind == "route") { out.attributes["virtual_router"] = hex(k.route.vr_id); out.attributes["prefix"] = prefixtext(k.route.destination); }
     if (kind == "fdb") { out.attributes["vlan"] = hex(k.fdb.bv_id); out.attributes["mac"] = mactext(k.fdb.mac_address); }
@@ -604,8 +622,13 @@ sai_status_t rawremove(const std::string& kind, const Key& k) {
     if (kind == "route") { auto p = api<sai_route_api_t>(SAI_API_ROUTE); return p->remove_route_entry ? p->remove_route_entry(&k.route) : SAI_STATUS_NOT_SUPPORTED; }
     auto o = ops(kind); return o.remove ? o.remove(k.id) : SAI_STATUS_NOT_SUPPORTED;
 }
-sai_tui::Object readback(uint64_t sw, const std::string& kind, const Key& k, const std::string& op) {
-    try { return observe(sw, kind, k); }
+std::set<std::string> names(const Attrs& attrs) {
+    std::set<std::string> out;
+    for (const auto& kv : attrs) out.insert(kv.first);
+    return out;
+}
+sai_tui::Object readback(uint64_t sw, const std::string& kind, const Key& k, const std::string& op, const Attrs& written) {
+    try { return observe(sw, kind, k, names(written)); }
     catch (const sai_tui::RpcError& e) { fail(e.status, op + " succeeded for " + kind + " " + k.text + "; READBACK FAILED (mutation not rolled back): " + e.message); }
 }
 } // namespace
@@ -685,7 +708,7 @@ void create(sai_tui::Object& out, uint64_t sw, const std::string& kind, const At
     check(rawcreate(sw, kind, k, attrs), "create " + kind + " failed; no implicit retry");
     if (kind != "route" && kind != "neighbor") k.text = hex(k.id);
     managed[sw].insert({kind, k.text});
-    out = readback(sw, kind, k, "create");
+    out = readback(sw, kind, k, "create", input);
 } catch (const interface_address::Error& e) { fail(e.status, e.what()); }
 void set(sai_tui::Object& out, uint64_t sw, const std::string& kind, const std::string& text, const Attrs& input) try {
     std::lock_guard<std::mutex> serial(operation);
@@ -709,7 +732,7 @@ void set(sai_tui::Object& out, uint64_t sw, const std::string& kind, const std::
                 // Earlier writes succeeded: still attempt actual readback, while
                 // preserving the original mutation failure as the RPC status.
                 try {
-                    auto observed = observe(sw, kind, k);
+                    auto observed = observe(sw, kind, k, names(input));
                     detail = "; partial readback observed {";
                     bool first = true;
                     for (const auto& value : observed.attributes) {
@@ -731,7 +754,7 @@ void set(sai_tui::Object& out, uint64_t sw, const std::string& kind, const std::
             fail(e.status, "set succeeded; READBACK FAILED for egress_mirror_sessions: " + e.message);
         }
     }
-    out = readback(sw, kind, k, "set (" + std::to_string(applied) + " attributes)");
+    out = readback(sw, kind, k, "set (" + std::to_string(applied) + " attributes)", input);
 } catch (const interface_address::Error& e) { fail(e.status, e.what()); }
 void remove(uint64_t sw, const std::string& kind, const std::string& text) try {
     std::lock_guard<std::mutex> serial(operation);
