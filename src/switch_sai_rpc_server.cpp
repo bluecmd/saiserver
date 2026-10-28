@@ -599,6 +599,18 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           std::memcpy(attr_list[i].value.chardata, attribute.value.chardata.c_str(), SAI_HOSTIF_NAME_SIZE);
           break;
 
+        case SAI_HOSTIF_ATTR_OPER_STATUS:
+          attr_list[i].value.booldata = attribute.value.booldata;
+          break;
+
+        case SAI_HOSTIF_ATTR_QUEUE:
+          attr_list[i].value.u32 = attribute.value.u32;
+          break;
+
+        case SAI_HOSTIF_ATTR_VLAN_TAG:
+          attr_list[i].value.s32 = attribute.value.s32;
+          break;
+
         default:
           SAI_THRIFT_LOG_ERR("Failed to parse attribute.");
           break;
@@ -1900,7 +1912,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       sai_attribute_t *attr_list = nullptr;
       sai_size_t attr_size = thrift_attr_list.size();
       sai_thrift_alloc_attr(attr_list, attr_size);
-      sai_thrift_parse_hostif_trap_group_attributes(attr_list, thrift_attr_list);
+      sai_thrift_parse_hostif_attributes(attr_list, thrift_attr_list);
 
       status = hostif_api->set_hostif_attribute(thrift_hif_id, attr_list);
       sai_thrift_free_attr(attr_list);
