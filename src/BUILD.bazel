@@ -10,27 +10,34 @@ cc_library(
     name = "interface_address",
     srcs = ["interface_address.cpp"],
     hdrs = ["interface_address.h"],
-    strip_include_prefix = ".",
-    deps = ["@saiserver_sai//:headers"],
     copts = SAISERVER_COPTS,
     linkopts = ["-pthread"],
+    strip_include_prefix = ".",
+    deps = ["@saiserver_sai//:headers"],
 )
 
 cc_library(
     name = "tui_rpc",
     srcs = ["tui_rpc.cpp"],
     hdrs = ["tui_rpc.h"],
-    strip_include_prefix = ".",
-    deps = [":interface_address", "//idl:switch_sai_cc", "@saiserver_sai//:headers"],
     copts = SAISERVER_COPTS,
     linkopts = ["-pthread"],
+    strip_include_prefix = ".",
+    deps = [
+        ":interface_address",
+        "//idl:switch_sai_cc",
+        "@saiserver_sai//:headers",
+    ],
 )
 
 cc_library(
     name = "bounded_rpc_processor",
     hdrs = ["bounded_rpc_processor.h"],
     strip_include_prefix = ".",
-    deps = [":tui_rpc", "//idl:switch_sai_cc"],
+    deps = [
+        ":tui_rpc",
+        "//idl:switch_sai_cc",
+    ],
 )
 
 # Listener entry points, split from server_lib so the startup regression can
@@ -44,29 +51,36 @@ cc_library(
 cc_library(
     name = "server_lib",
     srcs = ["switch_sai_rpc_server.cpp"],
-    strip_include_prefix = ".",
-    deps = [":bounded_rpc_processor", ":rpc_listener_api", ":tui_rpc"],
     # The legacy handler predates override annotations; retain other warnings.
     copts = SAISERVER_COPTS + ["-Wno-inconsistent-missing-override"],
+    strip_include_prefix = ".",
+    deps = [
+        ":bounded_rpc_processor",
+        ":rpc_listener_api",
+        ":tui_rpc",
+    ],
 )
 
 # The implementation is chosen explicitly at deployment, never via host -lsai.
 cc_library(
     name = "sai_dynamic",
     srcs = ["sai_dynamic.cpp"],
-    deps = ["@saiserver_sai//:headers"],
     copts = SAISERVER_COPTS,
-    linkopts = ["-ldl", "-pthread"],
+    linkopts = [
+        "-ldl",
+        "-pthread",
+    ],
     target_compatible_with = LINUX,
+    deps = ["@saiserver_sai//:headers"],
 )
 
 cc_library(
     name = "notifications",
     srcs = ["notifications.cpp"],
     hdrs = ["notifications.h"],
+    copts = SAISERVER_COPTS,
     strip_include_prefix = ".",
     deps = ["@saiserver_sai//:headers"],
-    copts = SAISERVER_COPTS,
 )
 
 # The server's main(), without the listener or SDK it links against. The
@@ -74,13 +88,22 @@ cc_library(
 cc_library(
     name = "server_main",
     srcs = ["saiserver.cpp"],
-    deps = [":notifications", ":rpc_listener_api", ":tui_rpc", "@saiserver_sai//:headers"],
     copts = SAISERVER_COPTS,
     linkopts = ["-pthread"],
+    deps = [
+        ":notifications",
+        ":rpc_listener_api",
+        ":tui_rpc",
+        "@saiserver_sai//:headers",
+    ],
 )
 
 cc_binary(
     name = "saiserver",
-    deps = [":server_lib", ":server_main", ":sai_dynamic"],
     target_compatible_with = LINUX,
+    deps = [
+        ":sai_dynamic",
+        ":server_lib",
+        ":server_main",
+    ],
 )

@@ -20,9 +20,12 @@ cc_binary(
         "compiler/cpp/src/thrift/parse/t_typedef.cc",
         "compiler/cpp/src/thrift/thriftl.cc",
         "compiler/cpp/src/thrift/thrifty.cc",
-    ] + glob(["compiler/cpp/src/thrift/**/*.h", "compiler/cpp/src/thrift/**/*.hh"]),
-    includes = ["compiler/cpp/src"],
+    ] + glob([
+        "compiler/cpp/src/thrift/**/*.h",
+        "compiler/cpp/src/thrift/**/*.hh",
+    ]),
     copts = ["-std=c++17"],
+    includes = ["compiler/cpp/src"],
 )
 
 # Fixed Linux/glibc configuration, not host probes. This runtime intentionally
@@ -90,14 +93,17 @@ cc_library(
         "lib/cpp/src/thrift/transport/TTransportException.cpp",
         "lib/cpp/src/thrift/transport/TTransportUtils.cpp",
     ],
-    hdrs = glob(["lib/cpp/src/thrift/**/*.h", "lib/cpp/src/thrift/**/*.tcc"]) + [":config"],
-    strip_include_prefix = "lib/cpp/src",
+    hdrs = glob([
+        "lib/cpp/src/thrift/**/*.h",
+        "lib/cpp/src/thrift/**/*.tcc",
+    ]) + [":config"],
     copts = ["-std=c++17"],
-    local_defines = ["STRERROR_R_CHAR_P"],
     linkopts = ["-pthread"],
+    local_defines = ["STRERROR_R_CHAR_P"],
+    strip_include_prefix = "lib/cpp/src",
+    target_compatible_with = ["@platforms//os:linux"],
     deps = [
         "@boost.predef//:boost.predef",
         "@boost.uuid//:boost.uuid",
     ],
-    target_compatible_with = ["@platforms//os:linux"],
 )

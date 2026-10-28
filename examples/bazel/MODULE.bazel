@@ -7,10 +7,18 @@ bazel_dep(name = "toolchains_llvm_bootstrapped", version = "0.5.9")
 
 # Development-only: exercise this checkout as an external Bzlmod dependency.
 # In production replace this with a commit-pinned git/archive override.
-local_path_override(module_name = "saiserver", path = "../..")
+local_path_override(
+    module_name = "saiserver",
+    path = "../..",
+)
 
 # rules_rust deliberately accepts toolchain configuration only from the root.
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
-rust.toolchain(edition = "2021", versions = ["1.94.0"], rustfmt_version = "1.94.0")
+rust.toolchain(
+    edition = "2021",
+    rustfmt_version = "1.94.0",
+    versions = ["1.94.0"],
+)
 use_repo(rust, "rust_toolchains")
+
 register_toolchains("@rust_toolchains//:all")

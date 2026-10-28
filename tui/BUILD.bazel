@@ -26,9 +26,9 @@ rust_library(
         ["src/*.rs"],
         exclude = ["src/main.rs"],
     ),
+    compile_data = ["//docs/evidence/seastone2:ixp-lab-sw2-sanitized.json"],
     crate_name = "sai_tui",
     crate_root = "src/lib.rs",
-    compile_data = ["//docs/evidence/seastone2:ixp-lab-sw2-sanitized.json"],
     edition = "2021",
     target_compatible_with = LINUX_X86_64,
     version = "0.1.0",
@@ -69,11 +69,11 @@ rust_test(
     size = "small",
     srcs = ["tests/cli.rs"],
     crate_name = "cli_test",
-    edition = "2021",
     # env! embeds a runfiles-relative path, not an execroot/host absolute path.
     # Bazel tests start in the main repository's runfiles directory; rootpath
     # also handles ../<repo>/... when this package is an external dependency.
     data = [":sai-tui"],
+    edition = "2021",
     rustc_env = {"CARGO_BIN_EXE_sai-tui": "$(rootpath :sai-tui)"},
     target_compatible_with = LINUX_X86_64,
     deps = [

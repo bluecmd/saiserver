@@ -22,8 +22,6 @@ thrift_library(
 
 cc_thrift_library(
     name = "switch_sai_cc",
-    lib = ":switch_sai_thrift",
-    recursive = True,
     outs = [
         "SaiTui.cpp",
         "SaiTui.h",
@@ -34,13 +32,15 @@ cc_thrift_library(
         "switch_sai_types.cpp",
         "switch_sai_types.h",
     ],
+    lib = ":switch_sai_thrift",
+    recursive = True,
 )
 
 # Standalone RPC crate, without the TUI's Ratatui dependency tree.
 rust_thrift_library(
     name = "sai_tui_rust",
-    lib = ":sai_tui_thrift",
     out = "sai_tui.rs",
     crate_name = "sai_tui_rpc",
+    lib = ":sai_tui_thrift",
     target_compatible_with = LINUX_X86_64,
 )

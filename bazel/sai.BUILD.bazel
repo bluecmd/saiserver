@@ -3,8 +3,14 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 # SAI is an interface specification. No proprietary implementation is bundled.
 cc_library(
     name = "headers",
-    hdrs = glob(["inc/*.h", "experimental/*.h"]),
-    includes = ["inc", "experimental"],
+    hdrs = glob([
+        "inc/*.h",
+        "experimental/*.h",
+    ]),
+    includes = [
+        "experimental",
+        "inc",
+    ],
     visibility = ["//visibility:public"],
 )
 

@@ -8,8 +8,8 @@ cc_test(
     name = "server_test",
     size = "small",
     srcs = ["server/tui_rpc_test.cpp"],
-    deps = ["//src:tui_rpc"],
     copts = SAISERVER_TEST_COPTS,
+    deps = ["//src:tui_rpc"],
 )
 
 cc_library(
@@ -17,24 +17,28 @@ cc_library(
     testonly = True,
     srcs = ["server/fake_sdk.cpp"],
     hdrs = ["server/fake_sdk.h"],
-    deps = ["//src:interface_address"],
     copts = SAISERVER_TEST_COPTS,
+    deps = ["//src:interface_address"],
 )
 
 cc_test(
     name = "interface_address_test",
     size = "small",
     srcs = ["server/interface_address_test.cpp"],
-    deps = [":fake_sdk"],
     copts = SAISERVER_TEST_COPTS,
+    deps = [":fake_sdk"],
 )
 
 cc_test(
     name = "interface_address_rpc_test",
     size = "small",
     srcs = ["server/interface_address_rpc_test.cpp"],
-    deps = [":fake_sdk", "//src:bounded_rpc_processor", "//src:tui_rpc"],
     copts = SAISERVER_TEST_COPTS,
+    deps = [
+        ":fake_sdk",
+        "//src:bounded_rpc_processor",
+        "//src:tui_rpc",
+    ],
 )
 
 # Real server main linked against the fixture's fake SDK and RPC listener.
@@ -42,6 +46,7 @@ cc_binary(
     name = "startup_test_bin",
     testonly = True,
     srcs = ["server/startup_test.cpp"],
+    copts = SAISERVER_TEST_COPTS,
     deps = [
         ":fake_sdk",
         "//src:notifications",
@@ -49,73 +54,79 @@ cc_binary(
         "//src:server_main",
         "//src:tui_rpc",
     ],
-    copts = SAISERVER_TEST_COPTS,
 )
 
 sh_test(
     name = "startup_test",
     size = "small",
     srcs = ["server/startup_cases.sh"],
-    data = [":startup_test_bin"],
     args = ["$(rootpath :startup_test_bin)"],
+    data = [":startup_test_bin"],
 )
 
 cc_test(
     name = "fdb_events_test",
     size = "small",
     srcs = ["test_fdb_events.cpp"],
-    deps = ["//src:notifications"],
     copts = SAISERVER_TEST_COPTS,
+    deps = ["//src:notifications"],
 )
 
 cc_binary(
     name = "fake_sai.so",
     testonly = True,
     srcs = ["fake_sai.cpp"],
-    deps = ["//:sai_headers"],
-    linkshared = True,
     copts = SAISERVER_TEST_COPTS,
+    linkshared = True,
+    deps = ["//:sai_headers"],
 )
 
 cc_binary(
     name = "incomplete_fake_sai.so",
     testonly = True,
     srcs = ["fake_sai.cpp"],
-    deps = ["//:sai_headers"],
+    copts = SAISERVER_TEST_COPTS,
     linkshared = True,
     local_defines = ["FAKE_SAI_OMIT_LOG_SET"],
-    copts = SAISERVER_TEST_COPTS,
+    deps = ["//:sai_headers"],
 )
 
 cc_binary(
     name = "optional_fake_sai.so",
     testonly = True,
-    srcs = ["fake_sai.cpp", "server/fake_optional_sai.cpp"],
-    deps = ["//:sai_headers"],
-    linkshared = True,
+    srcs = [
+        "fake_sai.cpp",
+        "server/fake_optional_sai.cpp",
+    ],
     copts = SAISERVER_TEST_COPTS,
+    linkshared = True,
+    deps = ["//:sai_headers"],
 )
 
 cc_test(
     name = "sai_dynamic_test",
     size = "small",
     srcs = ["test_sai_dynamic.cpp"],
-    deps = ["//src:sai_dynamic"],
-    data = [":fake_sai.so", ":incomplete_fake_sai.so", ":optional_fake_sai.so"],
     args = [
         "$(rootpath :fake_sai.so)",
         "$(rootpath :incomplete_fake_sai.so)",
         "$(rootpath :optional_fake_sai.so)",
     ],
     copts = SAISERVER_TEST_COPTS,
+    data = [
+        ":fake_sai.so",
+        ":incomplete_fake_sai.so",
+        ":optional_fake_sai.so",
+    ],
+    deps = ["//src:sai_dynamic"],
 )
 
 sh_test(
     name = "bazelw_test",
     size = "small",
     srcs = ["test_bazelw.sh"],
-    data = ["//:bazelw"],
     args = ["$(rootpath //:bazelw)"],
+    data = ["//:bazelw"],
 )
 
 # Every non-manual test in this package.

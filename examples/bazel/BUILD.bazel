@@ -6,11 +6,11 @@ cc_test(
     name = "cpp_consumer_test",
     srcs = ["consumer.cpp"],
     deps = [
+        ":consumer_cpp",
         "@saiserver//:sai_headers",
         "@saiserver//:sai_loader",
         "@saiserver//:server_lib",
         "@saiserver//:thrift_cpp",
-        ":consumer_cpp",
     ],
 )
 
@@ -35,11 +35,11 @@ thrift_library(
 
 cc_thrift_library(
     name = "consumer_cpp",
-    lib = ":consumer_thrift",
     outs = [
         "consumer_types.cpp",
         "consumer_types.h",
     ],
+    lib = ":consumer_thrift",
     deps = ["@saiserver//:thrift_cpp"],
 )
 
@@ -47,8 +47,8 @@ filegroup(
     name = "all_exports",
     srcs = [
         ":consumer_thrift",
-        "@saiserver//:thrift_idl",
         "@saiserver//:client",
         "@saiserver//:server",
+        "@saiserver//:thrift_idl",
     ],
 )
