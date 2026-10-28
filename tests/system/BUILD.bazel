@@ -130,3 +130,21 @@ sh_test(
     target_compatible_with = LINUX_X86_64,
     deps = ["@rules_shell//shell/runfiles"],
 )
+
+# A C++ exception thrown by a GCC-built SDK must not crash the server.
+sh_test(
+    name = "vs_sdk_exception_test",
+    size = "small",
+    srcs = ["vs_test.sh"],
+    args = _VS_ARGS + [
+        "--bind",
+        "$(rlocationpath :sdk_exception.sh):/systest/sdk_exception.sh",
+        "--",
+        "--no-server",
+        "/bin/bash",
+        "/systest/sdk_exception.sh",
+    ],
+    data = _VS + ["sdk_exception.sh"],
+    target_compatible_with = LINUX_X86_64,
+    deps = ["@rules_shell//shell/runfiles"],
+)

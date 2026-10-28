@@ -20,3 +20,8 @@ bzl_library(
         "@rules_rust//rust:bzl_lib",
     ],
 )
+
+bzl_library(
+    name = "unwinder",
+    srcs = ["unwinder.bzl"],
+)

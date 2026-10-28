@@ -292,6 +292,28 @@ SDK lifecycle calls and statuses are forwarded, not emulated.
 Vendor-specific weak-symbol version banners may be absent with local runtime
 loading; `sai_query_api_version` still queries the selected SDK itself.
 
+**C++ exceptions from the SDK.** SAI is a C ABI, so an SDK letting a C++
+exception escape a `sai_*` call is an SDK bug. The loader still catches it and
+returns `SAI_STATUS_FAILURE`, and if initialization failed the server exits
+without running static destructors, since the SDK may have left threads behind.
+Catching it is only possible because the process has a **single unwinder**. Our
+toolchain links LLVM libunwind statically, while a GCC-built SDK brings
+libgcc_s. Two unwinders in one process cannot handle each other's frames, and an
+SDK exception used to crash the server instead of being caught. Linking
+`//:sai_loader` therefore forces in and exports LLVM libunwind's full
+`_Unwind_*` API, so the dynamic linker binds the SDK's, libstdc++'s and
+libgcc_s's unwinder calls to it as well. LLVM libunwind is the only unwinder
+this toolchain supports, and it implements the same ABI as libgcc_s. See
+[`bazel/unwinder.bzl`](../bazel/unwinder.bzl) for the details;
+`//tests/system:vs_sdk_exception_test` checks it against SONiC's GCC-built
+libsaivs.
+
+This is containment, not a guarantee. LLVM libunwind now also unwinds
+exceptions the SDK throws and catches internally. An exception thrown on an SDK
+thread still terminates the process, as it would anywhere. An embedder that
+links an SDK directly must keep the same arrangement: one unwinder, exported
+from the executable.
+
 
 ## System tests against a software SAI
 

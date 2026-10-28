@@ -1,9 +1,10 @@
 #!/bin/bash
 # Runs inside nsrun's namespaces, chrooted into the Debian rootfs: starts the
 # Redis instance libsaivs requires, then saiserver on libsaivs, then "$@".
-# Usage: vs_switch.sh [--veth NAME]... COMMAND [ARGS...]
+# Usage: vs_switch.sh [--veth NAME]... [--no-server] COMMAND [ARGS...]
 # Each --veth creates an up veth pair NAME <-> peer-NAME to back a switch port
 # (named in the profile's lane map); the test sends and receives on peer-NAME.
+# --no-server runs COMMAND without starting Redis or saiserver.
 set -euo pipefail
 export LC_ALL=C LANG=C PATH=/usr/sbin:/usr/bin
 while [[ ${1:-} == --veth ]]; do
@@ -12,6 +13,10 @@ while [[ ${1:-} == --veth ]]; do
     ip link set "peer-$2" up
     shift 2
 done
+if [[ ${1:-} == --no-server ]]; then
+    shift
+    exec "$@"
+fi
 # libsaivs unconditionally opens ASIC_DB via SONiC's fixed config path. In this
 # rootfs /var/run is a plain directory (no maintainer scripts ran), not /run.
 mkdir -p /var/run/redis/sonic-db

@@ -297,17 +297,20 @@ int main(int argc, char* argv[]) {
 
   printf("================================\n");
 
+  // After a failed or partial SDK initialization, SDK threads may still run
+  // (libsaivs leaves its event queue thread waiting when init throws), so do
+  // not run C++ static destructors under them; see the teardown path below.
   auto status = sai_api_initialize(0, (sai_service_method_table_t *)&test_services);
   if (status == SAI_STATUS_SUCCESS) {
     int failed = sai_api_query(SAI_API_SWITCH, (void**)&sai_switch_api);
 
     if (failed != SAI_STATUS_SUCCESS) {
-      printf("SAI_API_SWITCH failed for %d apis", failed);
-      exit(EXIT_FAILURE);
+      printf("SAI_API_SWITCH failed for %d apis\n", failed);
+      fflush(nullptr); std::_Exit(EXIT_FAILURE);
     }
   } else {
-    printf("FATAL: failed to sai_api_initialize: %d", status);
-    exit(EXIT_FAILURE);
+    printf("FATAL: failed to sai_api_initialize: %d\n", status);
+    fflush(nullptr); std::_Exit(EXIT_FAILURE);
   }
 
   const std::uint32_t attrSz = options.addresses.enabled ? 7 : 6;

@@ -2,6 +2,7 @@ load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//bazel:constraints.bzl", "LINUX")
 load("//bazel:copts.bzl", "SAISERVER_COPTS")
+load("//bazel:unwinder.bzl", "SHARED_UNWINDER_LINKOPTS")
 
 # Exposed to other modules only through the aliases in //:BUILD.bazel.
 package(default_visibility = ["//:__subpackages__"])
@@ -61,10 +62,12 @@ cc_library(
     name = "sai_dynamic",
     srcs = ["sai_dynamic.cpp"],
     copts = SAISERVER_COPTS,
+    # A GCC-built SDK must share our unwinder, or its C++ exceptions crash
+    # instead of reaching the loader's catch-all: see bazel/unwinder.bzl.
     linkopts = [
         "-ldl",
         "-pthread",
-    ],
+    ] + SHARED_UNWINDER_LINKOPTS,
     target_compatible_with = LINUX,
     deps = ["@saiserver_sai//:headers"],
 )
