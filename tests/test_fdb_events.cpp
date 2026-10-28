@@ -1,13 +1,8 @@
 // Notification view regression tests. No switch or vendor library required.
-#include <sai.h>
+#include "notifications.h"
 #include <cassert>
-#include <mutex>
-#include <utility>
-#include <vector>
 
 std::vector<std::pair<sai_fdb_entry_t, sai_object_id_t>> gFdbMap;
-extern std::mutex gFdbMutex;
-void on_fdb_event(uint32_t count, sai_fdb_event_notification_data_t *data);
 
 int main() {
     sai_attribute_t attrs[2] = {};

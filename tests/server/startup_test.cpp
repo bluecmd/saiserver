@@ -1,11 +1,14 @@
 // Link the real server main against this fake SDK and fake RPC listener. No
 // socket is opened. All assertions exercise production CLI/lifecycle ordering.
-#define main unused_backend_tests_main
-#include "interface_address_test.cpp"
-#undef main
+#include "fake_sdk.h"
+#include "notifications.h"
+#include "switch_sai_rpc_server.h"
 #include "tui_rpc.h"
+#include <cassert>
 #include <cstdlib>
-extern std::atomic<bool> shutdown_requested;
+#include <iostream>
+
+using namespace fake_sdk;
 std::vector<std::pair<sai_fdb_entry_t, sai_object_id_t>> gFdbMap;
 namespace {
 bool enabled = false, stopped_rpc = false, created = false;

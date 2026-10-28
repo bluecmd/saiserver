@@ -1,5 +1,8 @@
 // Extends the baseline fake without changing its required-entrypoint behavior.
-#include "../fake_sai.cpp"
+// Linked together with tests/fake_sai.cpp into one DSO.
+extern "C" {
+#include <sai.h>
+}
 extern "C" sai_status_t sai_get_object_key(sai_object_id_t sw, sai_object_type_t type,
                                            uint32_t* count, sai_object_key_t* keys) {
     if (sw == 42) throw 42;

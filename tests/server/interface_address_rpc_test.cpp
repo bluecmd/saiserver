@@ -1,11 +1,13 @@
 // Reuse the packet/topology fake, not a mock responder. No sockets or SDK DSO.
-#define main backend_tests_main
-#include "interface_address_test.cpp"
-#undef main
+#include "fake_sdk.h"
 #include "tui_rpc.h"
 #include "bounded_rpc_processor.h"
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/transport/TBufferTransports.h>
+#include <cassert>
+#include <iostream>
+
+using namespace fake_sdk;
 
 extern "C" sai_status_t sai_api_query(sai_api_t api, void** out) { return query(api, out); }
 unsigned uninitializes = 0, switch_removes = 0, callback_sets = 0;
@@ -63,7 +65,6 @@ void gate_test(bool allowed) {
 }
 }
 int main() {
-    backend_tests_main();
     f.reset(); f.access(1); switch_observation();
     assert(!tui_rpc::bounded_only()); advertised("disabled", "0"); gate_test(true);
     sai_tui::Object out;

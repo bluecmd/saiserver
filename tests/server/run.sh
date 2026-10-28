@@ -13,8 +13,8 @@ trap 'rm -rf "$build"' EXIT
 for test in tui_rpc_test interface_address_rpc_test; do
 "$CXX" -std=c++11 -Wall -Wextra -Werror -pedantic -g ${SANITIZE_FLAGS:-} \
   -I"$SAI_HEADER_DIR" -I"$SAI_HEADER_DIR/experimental" -I"$SAI_HEADER_DIR/../experimental" \
-  -I"$build/gen-cpp" -Isrc ${EXTRA_CPPFLAGS:-} \
-  "tests/server/$test.cpp" src/tui_rpc.cpp src/interface_address.cpp \
+  -I"$build/gen-cpp" -Isrc -Itests/server ${EXTRA_CPPFLAGS:-} \
+  "tests/server/$test.cpp" tests/server/fake_sdk.cpp src/tui_rpc.cpp src/interface_address.cpp \
   "$build/gen-cpp/sai_tui_types.cpp" "$build/gen-cpp/SaiTui.cpp" \
   "$build/gen-cpp/switch_sai_types.cpp" "$build/gen-cpp/switch_sai_rpc.cpp" \
   ${EXTRA_LDFLAGS:-} -lthrift -pthread -o "$build/$test"
@@ -23,7 +23,7 @@ done
 # Real main + fake SDK/listener: no bind(), SDK DSO, signal injection or hardware.
 "$CXX" -std=c++11 -Wall -Wextra -Werror -Wno-unused-parameter -pedantic -g ${SANITIZE_FLAGS:-} \
   -I"$SAI_HEADER_DIR" -I"$SAI_HEADER_DIR/experimental" -I"$SAI_HEADER_DIR/../experimental" \
-  -I"$build/gen-cpp" -Isrc ${EXTRA_CPPFLAGS:-} \
-  tests/server/startup_test.cpp src/saiserver.cpp src/tui_rpc.cpp src/interface_address.cpp \
+  -I"$build/gen-cpp" -Isrc -Itests/server ${EXTRA_CPPFLAGS:-} \
+  tests/server/startup_test.cpp tests/server/fake_sdk.cpp src/saiserver.cpp src/notifications.cpp src/tui_rpc.cpp src/interface_address.cpp \
   "$build/gen-cpp/sai_tui_types.cpp" ${EXTRA_LDFLAGS:-} -lthrift -pthread -o "$build/startup_test"
 tests/server/startup_cases.sh "$build/startup_test"

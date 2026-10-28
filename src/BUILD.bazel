@@ -4,13 +4,9 @@ load("//bazel:thrift.bzl", "thrift_codegen")
 
 package(default_visibility = ["//visibility:public"])
 
-# The startup regression links the real main against its own fake SDK and RPC
-# listener, so the server source is exported rather than wrapped in a library.
 exports_files([
     "sai_tui.thrift",
-    "saiserver.cpp",
     "switch_sai.thrift",
-    "switch_sai_rpc_server.h",
 ])
 
 filegroup(
@@ -88,12 +84,19 @@ cc_library(
     deps = [":thrift_cpp", ":tui_rpc"],
 )
 
+# Listener entry points, split from server_lib so the startup regression can
+# link the real main against a fake listener.
+cc_library(
+    name = "rpc_listener_api",
+    hdrs = ["switch_sai_rpc_server.h"],
+    strip_include_prefix = ".",
+)
+
 cc_library(
     name = "server_lib",
     srcs = ["switch_sai_rpc_server.cpp"],
-    hdrs = ["switch_sai_rpc_server.h"],
     strip_include_prefix = ".",
-    deps = [":bounded_rpc_processor", ":tui_rpc"],
+    deps = [":bounded_rpc_processor", ":rpc_listener_api", ":tui_rpc"],
     # The legacy handler predates override annotations; retain other warnings.
     copts = ["-std=c++17", "-Wno-inconsistent-missing-override"],
 )
@@ -108,22 +111,27 @@ cc_library(
     target_compatible_with = ["@platforms//os:linux"],
 )
 
-cc_binary(
-    name = "saiserver",
-    srcs = ["saiserver.cpp"],
-    deps = [":server_lib", ":sai_dynamic"],
+cc_library(
+    name = "notifications",
+    srcs = ["notifications.cpp"],
+    hdrs = ["notifications.h"],
+    strip_include_prefix = ".",
+    deps = ["@saiserver_sai//:headers"],
     copts = ["-std=c++17"],
-    target_compatible_with = ["@platforms//os:linux"],
 )
 
-# Test-only variant keeps the real notification code while discarding the
-# unused server main, exactly as the existing regression's build does.
+# The server's main(), without the listener or SDK it links against. The
+# binary below supplies the real ones; the startup regression supplies fakes.
 cc_library(
-    name = "fdb_test_support",
-    testonly = True,
-    srcs = ["saiserver.cpp", "switch_sai_rpc_server.h"],
-    deps = [":thrift_cpp", ":tui_rpc", "@saiserver_sai//:headers"],
-    copts = ["-std=c++17", "-ffunction-sections", "-fdata-sections"],
-    local_defines = ["main=saiserver_unused_main"],
-    linkopts = ["-Wl,--gc-sections", "-pthread"],
+    name = "server_main",
+    srcs = ["saiserver.cpp"],
+    deps = [":notifications", ":rpc_listener_api", ":tui_rpc", "@saiserver_sai//:headers"],
+    copts = ["-std=c++17"],
+    linkopts = ["-pthread"],
+)
+
+cc_binary(
+    name = "saiserver",
+    deps = [":server_lib", ":server_main", ":sai_dynamic"],
+    target_compatible_with = ["@platforms//os:linux"],
 )

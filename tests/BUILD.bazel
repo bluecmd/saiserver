@@ -12,25 +12,26 @@ cc_test(
     copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-UNDEBUG"],
 )
 
-# The fake-SDK fixture is #included by its sibling tests, not compiled alone.
 cc_library(
-    name = "interface_address_fixture",
+    name = "fake_sdk",
     testonly = True,
-    textual_hdrs = ["server/interface_address_test.cpp"],
+    srcs = ["server/fake_sdk.cpp"],
+    hdrs = ["server/fake_sdk.h"],
     deps = ["//src:interface_address"],
+    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-UNDEBUG"],
 )
 
 cc_test(
     name = "interface_address_test",
     srcs = ["server/interface_address_test.cpp"],
-    deps = ["//src:interface_address"],
+    deps = [":fake_sdk"],
     copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-UNDEBUG"],
 )
 
 cc_test(
     name = "interface_address_rpc_test",
     srcs = ["server/interface_address_rpc_test.cpp"],
-    deps = [":interface_address_fixture", "//src:bounded_rpc_processor"],
+    deps = [":fake_sdk", "//src:bounded_rpc_processor", "//src:tui_rpc"],
     copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-UNDEBUG"],
 )
 
@@ -38,12 +39,14 @@ cc_test(
 cc_binary(
     name = "startup_test_bin",
     testonly = True,
-    srcs = [
-        "server/startup_test.cpp",
-        "//src:saiserver.cpp",
-        "//src:switch_sai_rpc_server.h",
+    srcs = ["server/startup_test.cpp"],
+    deps = [
+        ":fake_sdk",
+        "//src:notifications",
+        "//src:rpc_listener_api",
+        "//src:server_main",
+        "//src:tui_rpc",
     ],
-    deps = [":interface_address_fixture", "//src:tui_rpc"],
     copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter", "-UNDEBUG"],
 )
 
@@ -57,7 +60,7 @@ sh_test(
 cc_test(
     name = "fdb_events_test",
     srcs = ["test_fdb_events.cpp"],
-    deps = ["//src:fdb_test_support"],
+    deps = ["//src:notifications"],
     copts = ["-std=c++17", "-UNDEBUG"],
 )
 
@@ -83,16 +86,10 @@ cc_binary(
 cc_binary(
     name = "optional_fake_sai.so",
     testonly = True,
-    srcs = ["server/fake_optional_sai.cpp"],
-    deps = [":fake_sai_source", "//:sai_headers"],
+    srcs = ["fake_sai.cpp", "server/fake_optional_sai.cpp"],
+    deps = ["//:sai_headers"],
     linkshared = True,
     copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
-)
-
-cc_library(
-    name = "fake_sai_source",
-    testonly = True,
-    textual_hdrs = ["fake_sai.cpp"],
 )
 
 cc_test(

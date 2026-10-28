@@ -41,6 +41,8 @@ $(ODIR)/tui_rpc.o: src/tui_rpc.cpp src/tui_rpc.h $(CPP_HEADERS) | $(ODIR)
 	$(CXX) $(CPPFLAGS) $(CFLAGS) $(CXXFLAGS) -MMD -MP -c $< -o $@
 $(ODIR)/saiserver.o: src/saiserver.cpp $(CPP_HEADERS) | $(ODIR)
 	$(CXX) $(CPPFLAGS) $(CFLAGS) $(CXXFLAGS) $(CDEFS) -MMD -MP -c $< -o $@
+$(ODIR)/notifications.o: src/notifications.cpp src/notifications.h | $(ODIR)
+	$(CXX) $(CPPFLAGS) $(CFLAGS) $(CXXFLAGS) -MMD -MP -c $< -o $@
 
 $(ODIR)/interface_address.o: src/interface_address.cpp src/interface_address.h | $(ODIR)
 	$(CXX) $(CPPFLAGS) $(CFLAGS) $(CXXFLAGS) -pthread -MMD -MP -c $< -o $@
@@ -49,7 +51,7 @@ $(ODIR)/sai_dynamic.o: src/sai_dynamic.cpp | $(ODIR)
 
 $(ODIR)/librpcserver.a: $(RPC_OBJS) $(CONSTANS_OBJ)
 	ar rcs $@ $^
-saiserver: $(ODIR)/saiserver.o $(ODIR)/librpcserver.a $(ODIR)/sai_dynamic.o
+saiserver: $(ODIR)/saiserver.o $(ODIR)/notifications.o $(ODIR)/librpcserver.a $(ODIR)/sai_dynamic.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 test-server:
