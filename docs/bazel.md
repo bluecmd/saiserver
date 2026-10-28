@@ -76,7 +76,9 @@ inputs. This does not claim hermetic execution of ASIC software.
 
 ## Public targets
 
-All these labels also work as `@saiserver//:...` from another module.
+All these labels also work as `@saiserver//:...` from another module. They,
+the `//idl` IDL targets and `//bazel:*.bzl` are the public surface; `//src` and
+`//tui` targets are visible only inside this repository.
 
 | Target | Kind / purpose |
 |---|---|

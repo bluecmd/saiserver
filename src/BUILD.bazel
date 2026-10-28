@@ -3,7 +3,8 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//bazel:constraints.bzl", "LINUX")
 load("//bazel:copts.bzl", "SAISERVER_COPTS")
 
-package(default_visibility = ["//visibility:public"])
+# Exposed to other modules only through the aliases in //:BUILD.bazel.
+package(default_visibility = ["//:__subpackages__"])
 
 cc_library(
     name = "interface_address",

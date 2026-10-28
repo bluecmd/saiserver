@@ -2,7 +2,8 @@ load("@aspect_bazel_lib//lib:write_source_files.bzl", "write_source_files")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
 load("//bazel:constraints.bzl", "LINUX_X86_64")
 
-package(default_visibility = ["//visibility:public"])
+# Exposed to other modules only through the aliases in //:BUILD.bazel.
+package(default_visibility = ["//:__subpackages__"])
 
 exports_files([
     "Cargo.Bazel.lock",
