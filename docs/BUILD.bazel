@@ -1,0 +1,5 @@
+# The workflow examples in tui.md are executed by //tests/system.
+exports_files(
+    ["tui.md"],
+    visibility = ["//tests/system:__pkg__"],
+)

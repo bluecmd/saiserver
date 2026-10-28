@@ -246,13 +246,16 @@ rollback, transaction, automatic cleanup, or automatic mutation retry.
 Each raw command below is a separate review/approval and readback. The explicit
 preset application workflow instead reviews the whole ordered plan, with a
 separate confirmation and per-step readbacks. No workflow silently bundles mutations. Use actual returned/discovered keys in
-place of the labels (and add `--command '...' --yes` for headless use).
+place of the labels (and add `--command '...' --yes` for headless use). A
+`# -> LABEL` comment names the key a create returns; it is not part of the
+command. `//tests/system:vs_docs_workflows_test` runs these blocks verbatim,
+in order, against SONiC's virtual-switch SAI.
 
 ### Access and trunk VLANs
 
 ```text
-create vlan vlan_id=100
-create bridge_port port=PORT_OID admin=true learning=hardware
+create vlan vlan_id=100                                     # -> VLAN_OID
+create bridge_port port=PORT_OID admin=true learning=hardware  # -> BRIDGE_PORT_OID
 create vlan_member vlan=VLAN_OID bridge_port=BRIDGE_PORT_OID tagging=untagged
 set port PORT_OID pvid=100
 ```
@@ -261,11 +264,14 @@ Reuse a discovered bridge port instead of duplicating it when one exists.
 Untagged membership controls egress; PVID classifies untagged ingress. They are
 independent operations and either can fail, so inspect both readbacks.
 
-For a trunk, create a **tagged membership for each VLAN** on that bridge port:
+For a trunk, create a **tagged membership for each VLAN** on that port's bridge
+port:
 
 ```text
-create vlan_member vlan=VLAN_100_OID bridge_port=BRIDGE_PORT_OID tagging=tagged
-create vlan_member vlan=VLAN_200_OID bridge_port=BRIDGE_PORT_OID tagging=tagged
+create vlan vlan_id=200                                     # -> VLAN_200_OID
+create bridge_port port=TRUNK_PORT_OID admin=true learning=hardware  # -> TRUNK_BRIDGE_PORT_OID
+create vlan_member vlan=VLAN_OID bridge_port=TRUNK_BRIDGE_PORT_OID tagging=tagged
+create vlan_member vlan=VLAN_200_OID bridge_port=TRUNK_BRIDGE_PORT_OID tagging=tagged
 ```
 
 Only set PVID if an intended native/untagged VLAN exists. Changing tagging uses
@@ -280,13 +286,13 @@ its consumers.
 ### IPv4 and IPv6 forwarding
 
 ```text
-create virtual_router ipv4=true ipv6=true
-create router_interface virtual_router=VR_OID vlan=VLAN_OID mtu=1500 ipv4=true ipv6=true
+create virtual_router ipv4=true ipv6=true                   # -> VR_OID
+create router_interface virtual_router=VR_OID vlan=VLAN_OID mtu=1500 ipv4=true ipv6=true  # -> RIF_OID
 create neighbor router_interface=RIF_OID ip=192.0.2.2 mac=02:00:00:00:00:02
-create next_hop router_interface=RIF_OID ip=192.0.2.2
+create next_hop router_interface=RIF_OID ip=192.0.2.2       # -> V4_NH_OID
 create route virtual_router=VR_OID prefix=198.51.100.0/24 next_hop=V4_NH_OID
 create neighbor router_interface=RIF_OID ip=2001:db8::2 mac=02:00:00:00:00:02
-create next_hop router_interface=RIF_OID ip=2001:db8::2
+create next_hop router_interface=RIF_OID ip=2001:db8::2     # -> V6_NH_OID
 create route virtual_router=VR_OID prefix=2001:db8:1::/64 next_hop=V6_NH_OID
 get neighbor RIF_OID@2001:db8::2
 set route VR_OID@2001:db8:1::/64 action=drop
@@ -308,11 +314,11 @@ require; every removal still requires confirmation.
 ### IPv4/IPv6 ACLs and binding
 
 ```text
-create acl_table stage=ingress family=ipv4
-create acl_entry table=V4_TABLE_OID priority=100 action=deny src=192.0.2.0/24 protocol=6 enable=true
-create acl_table stage=ingress family=ipv6
+create acl_table stage=ingress family=ipv4                  # -> V4_TABLE_OID
+create acl_entry table=V4_TABLE_OID priority=100 action=deny src=192.0.2.0/24 protocol=6 enable=true  # -> ENTRY_OID
+create acl_table stage=ingress family=ipv6                  # -> V6_TABLE_OID
 create acl_entry table=V6_TABLE_OID priority=100 action=permit src=2001:db8::/32 dst=2001:db8:1::/64 protocol=17 enable=true
-create acl_group stage=ingress
+create acl_group stage=ingress                              # -> GROUP_OID
 create acl_group_member group=GROUP_OID table=V4_TABLE_OID priority=100
 create acl_group_member group=GROUP_OID table=V6_TABLE_OID priority=200
 set port PORT_OID ingress_acl=GROUP_OID

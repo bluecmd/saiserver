@@ -291,6 +291,54 @@ Vendor-specific weak-symbol version banners may be absent with local runtime
 loading; `sai_query_api_version` still queries the selected SDK itself.
 
 
+## System tests against a software SAI
+
+`//tests/system` runs the real `saiserver` and `sai-tui` against SONiC's
+virtual-switch SAI, **libsaivs**, as an ordinary `bazel test` (part of `//...`):
+
+```sh
+bazel test //tests/system/...
+```
+
+`vs_docs_workflows_test` executes every command of the "Explicit workflows" in
+[tui.md](tui.md) verbatim and in order, through the CLI, requiring verified
+readback for each; `# -> LABEL` comments there bind the returned keys for later
+commands. It then removes everything it created and verifies the removals. A
+documented example that stops working therefore fails the build.
+
+libsaivs keeps a metadata-validated object model; it does **not** forward
+packets, so this covers the management plane (validation, object references,
+getters, readback and removal), not data-plane behaviour.
+
+How it runs, without root or a container engine:
+
+- `vs_rootfs` is a Debian trixie userspace from `rules_distroless`, resolved
+  from a snapshot.debian.org timestamp (the package-index hashes are pinned in
+  `MODULE.bazel.lock`), plus the SONiC `libsaivs`, `libsaimetadata` and
+  `libswsscommon` packages. Those are mirrored with provenance in the
+  [`sonic-vs-debs-20261028.2`](https://github.com/bluecmd/saiserver/releases/tag/sonic-vs-debs-20261028.2)
+  release and pinned by SHA-256.
+- The test unpacks the rootfs into `TEST_TMPDIR`; `nsrun` (`nsrun.cc`) then
+  chroots into it inside new user, mount, network, PID, IPC and UTS
+  namespaces, with only loopback networking.
+  This needs unprivileged user namespaces, which `bazelw` already requires.
+- `vs_switch.sh` starts the Redis instance libsaivs insists on and the server
+  with `SAI_LIBRARY_PATH` pointing at libsaivs, then runs the test command.
+
+Known libsaivs limitations, pinned so a change is noticed:
+
+- Attributes left at their SAI defaults read back as `NOT_IMPLEMENTED`; the
+  server reports them as `unavailable.<name>` (see [server-api.md](server-api.md)).
+- ACL table match-field enables that were not set at creation cannot be read,
+  and they identify the table, so the ACL workflow fails at its first
+  `create acl_table` with `READBACK FAILED`. The test asserts exactly that
+  (`--known-unsupported`) and skips the rest of that section.
+
+To move to newer SONiC packages, download the trixie debs from a successful
+`Azure.sonic-buildimage.official.vs` build, attach them with provenance to a new
+release, and update the URLs and hashes in `MODULE.bazel`. Changing the Debian
+snapshot timestamp needs `--lockfile_mode=update` once.
+
 ## Verification and maintenance
 
 Project tests cover 29 Rust unit/integration cases, the existing getter-backed

@@ -119,3 +119,74 @@ http_archive(
     strip_prefix = "SAI-1.18.1",
     urls = ["https://github.com/opencomputeproject/SAI/archive/refs/tags/v1.18.1.tar.gz"],
 )
+
+# --- System tests (//tests/system); dev-only, never loaded by consumers. ---
+
+bazel_dep(name = "rules_distroless", version = "0.9.4", dev_dependency = True)
+bazel_dep(name = "tar.bzl", version = "0.6.0", dev_dependency = True)
+
+# Debian trixie userspace for running SONiC's libsaivs, pinned to a snapshot.
+apt = use_extension(
+    "@rules_distroless//apt:extensions.bzl",
+    "apt",
+    dev_dependency = True,
+)
+apt.sources_list(
+    architectures = ["amd64"],
+    components = ["main"],
+    suites = [
+        "trixie",
+        "trixie-updates",
+    ],
+    types = ["deb"],
+    uris = ["https://snapshot.debian.org/archive/debian/20261027T000000Z"],
+)
+apt.sources_list(
+    architectures = ["amd64"],
+    components = ["main"],
+    suites = ["trixie-security"],
+    types = ["deb"],
+    uris = ["https://snapshot.debian.org/archive/debian-security/20261027T000000Z"],
+)
+apt.install(
+    dependency_set = "systest_trixie",
+    packages = [
+        "base-files",
+        "bash",
+        "coreutils",
+        "grep",
+        "iproute2",
+        "redis-server",
+        # Runtime dependencies of the SONiC packages below.
+        "libboost-serialization1.83.0",
+        "libhiredis1.1.0",
+        "libnl-3-200",
+        "libnl-nf-3-200",
+        "libnl-route-3-200",
+        "libuuid1",
+        "libyang3",
+        "libzmq5",
+    ],
+    suites = [
+        "trixie",
+        "trixie-security",
+        "trixie-updates",
+    ],
+)
+use_repo(apt, "systest_trixie")
+
+# SONiC's virtual-switch SAI, mirrored with provenance; see the release notes.
+_SONIC_VS = "https://github.com/bluecmd/saiserver/releases/download/sonic-vs-debs-20261028.2/"
+
+[http_archive(
+    name = "sonic_vs_" + name,
+    # type = "deb" unpacks the ar archive; data.tar.xz is the package's file layer.
+    build_file_content = 'alias(name = "data", actual = "data.tar.xz", visibility = ["//visibility:public"])',
+    sha256 = sha256,
+    type = "deb",
+    urls = [_SONIC_VS + name + "_1.0.0_amd64.deb"],
+) for name, sha256 in {
+    "libsaimetadata": "5e8786c7f9f613f6d804efcde21968a4e1a0cffdbf603f9992a179312d73c695",
+    "libsaivs": "07979d5a52f03b7557e04a35cc8143238eebdf983939f30ebdb6b86cd39e58f0",
+    "libswsscommon": "616f4171ee4f52789940bac29ed100de7be49fd28f7980de1b56eb26a83fbec1",
+}.items()]

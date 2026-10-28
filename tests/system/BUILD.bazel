@@ -1,0 +1,92 @@
+# System tests: the real saiserver and sai-tui against SONiC's virtual-switch
+# SAI (libsaivs), in a pinned Debian rootfs inside unprivileged namespaces.
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_distroless//distroless:defs.bzl", "flatten")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rustfmt_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("@tar.bzl", "tar")
+load("//bazel:constraints.bzl", "LINUX_X86_64")
+load("//bazel:copts.bzl", "SAISERVER_TEST_COPTS")
+
+cc_binary(
+    name = "nsrun",
+    testonly = True,
+    srcs = ["nsrun.cc"],
+    copts = SAISERVER_TEST_COPTS,
+    target_compatible_with = LINUX_X86_64,
+)
+
+# Debian maintainer scripts normally create /bin/sh; they are not run here.
+# libsaivs shells out (`ip macsec show`) while creating the switch.
+tar(
+    name = "sh_link",
+    mtree = ["./usr/bin/sh type=link link=bash"],
+)
+
+flatten(
+    name = "vs_rootfs",
+    testonly = True,
+    target_compatible_with = LINUX_X86_64,
+    tars = [
+        "@systest_trixie//:flat",
+        "@sonic_vs_libsaimetadata//:data",
+        "@sonic_vs_libsaivs//:data",
+        "@sonic_vs_libswsscommon//:data",
+        ":sh_link",
+    ],
+)
+
+rust_binary(
+    name = "docs_workflows",
+    testonly = True,
+    srcs = ["docs_workflows.rs"],
+    edition = "2021",
+    target_compatible_with = LINUX_X86_64,
+    deps = ["@saiserver_crates//:serde_json"],
+)
+
+rustfmt_test(
+    name = "rustfmt_test",
+    size = "small",
+    targets = [":docs_workflows"],
+)
+
+_VS = [
+    ":nsrun",
+    ":vs_rootfs",
+    "//src:saiserver",
+    "//tui:sai-tui",
+    "vs_switch.sh",
+    "vs.profile",
+    "database_config.json",
+]
+
+_VS_ARGS = ["$(rlocationpath %s)" % label for label in _VS]
+
+# Every command in docs/tui.md's "Explicit workflows" must work verbatim.
+sh_test(
+    name = "vs_docs_workflows_test",
+    size = "medium",
+    srcs = ["vs_test.sh"],
+    args = _VS_ARGS + [
+        "--bind",
+        "$(rlocationpath :docs_workflows):/systest/bin/docs_workflows",
+        "--bind",
+        "$(rlocationpath //docs:tui.md):/systest/docs/tui.md",
+        "--",
+        "/systest/bin/docs_workflows",
+        # libsaivs cannot read back ACL table match-field enables that were not
+        # set at creation (create-only attributes, so readback stays strict).
+        "--known-unsupported",
+        # (Bazel tokenizes args like a shell, hence the inner quotes.)
+        "'IPv4/IPv6 ACLs and binding=attr 4096'",
+        "/systest/bin/sai-tui",
+        "/systest/docs/tui.md",
+    ],
+    data = _VS + [
+        ":docs_workflows",
+        "//docs:tui.md",
+    ],
+    target_compatible_with = LINUX_X86_64,
+    deps = ["@rules_shell//shell/runfiles"],
+)
