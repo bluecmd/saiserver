@@ -489,16 +489,9 @@ attributes, CRUD, known-key and bound-session discovery, egress mirror-list
 replacement/detach, speed marshalling, exact MAC/TCP ACL fields and masks,
 MAC-only/non-IP table construction, independent deny entries, malformed and
 unsupported inputs, original errors, partial writes and failed readback. Local
-SAI 1.18.1 headers were inspected in
-`/home/bluecmd/saiserver/.lab/sai/inc/{saimirror,saiport,saiacl}.h`.
-A reproducible command for that checkout and the available Homebrew Thrift is:
-
-```sh
-SAI_HEADER_DIR=/home/bluecmd/saiserver/.lab/sai/inc \
-EXTRA_CPPFLAGS=-I/opt/linuxbrew/.linuxbrew/opt/thrift/include \
-EXTRA_LDFLAGS='-L/opt/linuxbrew/.linuxbrew/opt/thrift/lib -Wl,-rpath,/opt/linuxbrew/.linuxbrew/opt/thrift/lib' \
-  tests/server/run.sh
-```
+SAI 1.18.1 headers (`saimirror.h`, `saiport.h`, `saiacl.h`) were inspected; the
+pinned Bazel build uses the same release, so `./bazelw test //tests:tests`
+reproduces this coverage.
 
 This extension has **not** been deployed or tested against live ASICs. No
 Rust/UI, generated Thrift, hostif/address-control-plane or deployment changes are
