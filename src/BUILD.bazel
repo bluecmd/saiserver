@@ -47,6 +47,7 @@ cc_library(
 cc_library(
     name = "server_lib",
     srcs = ["switch_sai_rpc_server.cpp"],
+    hdrs = ["switch_sai_rpc_handler.h"],
     # The legacy handler predates override annotations; retain other warnings.
     copts = SAISERVER_COPTS + ["-Wno-inconsistent-missing-override"],
     deps = [

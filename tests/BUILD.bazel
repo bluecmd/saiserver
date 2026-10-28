@@ -41,6 +41,20 @@ cc_test(
     ],
 )
 
+# The legacy hostif RPCs, through the real handler and processor.
+cc_test(
+    name = "hostif_rpc_test",
+    size = "small",
+    srcs = ["server/hostif_rpc_test.cpp"],
+    copts = SAISERVER_TEST_COPTS,
+    deps = [
+        ":fake_sdk",
+        "//src:bounded_rpc_processor",
+        "//src:notifications",
+        "//src:server_lib",
+    ],
+)
+
 # Real server main linked against the fixture's fake SDK and RPC listener.
 cc_binary(
     name = "startup_test_bin",

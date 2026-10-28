@@ -36,6 +36,7 @@
 #include "switch_sai_rpc.h"
 #include "src/tui_rpc.h"
 #include "src/bounded_rpc_processor.h"
+#include "src/switch_sai_rpc_handler.h"
 #include <thread>
 #include <condition_variable>
 #include <thrift/protocol/TBinaryProtocol.h>
@@ -600,6 +601,18 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
 
         case SAI_HOSTIF_ATTR_NAME:
           std::memcpy(attr_list[i].value.chardata, attribute.value.chardata.c_str(), SAI_HOSTIF_NAME_SIZE);
+          break;
+
+        case SAI_HOSTIF_ATTR_OPER_STATUS:
+          attr_list[i].value.booldata = attribute.value.booldata;
+          break;
+
+        case SAI_HOSTIF_ATTR_QUEUE:
+          attr_list[i].value.u32 = attribute.value.u32;
+          break;
+
+        case SAI_HOSTIF_ATTR_VLAN_TAG:
+          attr_list[i].value.s32 = attribute.value.s32;
           break;
 
         default:
@@ -1903,7 +1916,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       sai_attribute_t *attr_list = nullptr;
       sai_size_t attr_size = thrift_attr_list.size();
       sai_thrift_alloc_attr(attr_list, attr_size);
-      sai_thrift_parse_hostif_trap_group_attributes(attr_list, thrift_attr_list);
+      sai_thrift_parse_hostif_attributes(attr_list, thrift_attr_list);
 
       status = hostif_api->set_hostif_attribute(thrift_hif_id, attr_list);
       sai_thrift_free_attr(attr_list);
@@ -4153,6 +4166,10 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
     }
 };
 
+std::shared_ptr<switch_sai::switch_sai_rpcIf> make_switch_sai_rpc_handler() {
+    return std::make_shared<switch_sai_rpcHandler>();
+}
+
 namespace {
 std::thread rpc_thread;
 std::shared_ptr<TSimpleServer> rpc_server;
@@ -4171,7 +4188,7 @@ extern "C" int start_sai_thrift_rpc_server(int port) {
     std::unique_lock<std::mutex> lock(rpc_lifecycle);
     if (rpc_thread.joinable()) return -1;
     try {
-        auto handler = std::make_shared<switch_sai_rpcHandler>();
+        auto handler = make_switch_sai_rpc_handler();
         auto processor = std::make_shared<BoundedRpcProcessor>(handler, rpc_accepting);
         auto socket = std::make_shared<TServerSocket>(port);
         // Interrupt idle/persistent clients on stop(), not just the listener.
