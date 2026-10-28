@@ -169,8 +169,8 @@ fetch environment. The minimal bootstrap avoids that extra tool by using
 archives. The example's local override is solely for testing this checkout,
 not an implicit dependency on a developer machine.
 
-Dependency `.bazelrc` files are **not inherited**. Copy the example's
-[.bazelrc](../examples/bazel/.bazelrc), in particular the hermetic compiler
+Dependency `.bazelrc` files are **not inherited**. Copy this repository's
+[.bazelrc](../.bazelrc) (the example imports it), in particular the hermetic compiler
 selection/strict environment and this required Rust/LLVM interoperability flag:
 
 ```text
@@ -338,7 +338,8 @@ bazel test //...
 (cd examples/bazel && bazel test --lockfile_mode=update //...)
 ```
 
-Commit the Cargo, crate_universe and both Bzlmod locks together. Do not use a
+Format and lint Starlark with `bazel run //tools:buildifier` (or
+`//tools:buildifier.check` to only report). Commit the Cargo, crate_universe and both Bzlmod locks together. Do not use a
 repin environment variable during ordinary builds. Changing toolchain/SAI/Thrift
 versions also requires updating the explicit archive hashes, regenerating locks,
 and repeating the downstream and clean-sandbox checks.

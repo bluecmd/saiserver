@@ -1,9 +1,22 @@
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+
 package(default_visibility = ["//visibility:public"])
 
-exports_files([
-    "sai.BUILD.bazel",
-    "thrift.BUILD.bazel",
-    "constraints.bzl",
-    "copts.bzl",
-    "thrift.bzl",
-])
+bzl_library(
+    name = "constraints",
+    srcs = ["constraints.bzl"],
+)
+
+bzl_library(
+    name = "copts",
+    srcs = ["copts.bzl"],
+)
+
+bzl_library(
+    name = "thrift",
+    srcs = ["thrift.bzl"],
+    deps = [
+        "@rules_cc//cc:core_rules",
+        "@rules_rust//rust:bzl_lib",
+    ],
+)

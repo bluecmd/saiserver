@@ -15,6 +15,9 @@ bazel_dep(name = "boost.uuid", version = "1.89.0.bcr.2")
 bazel_dep(name = "boost.predef", version = "1.89.0.bcr.2")
 bazel_dep(name = "aspect_bazel_lib", version = "2.19.3")
 
+# Formatting/lint only; //tools is never loaded by downstream modules.
+bazel_dep(name = "buildifier_prebuilt", version = "10.1.0", dev_dependency = True)
+
 # Includes LLVM, linker, libc headers/CRTs, C++ standard library and runtimes.
 # Never auto-detect a host compiler or /usr/include.
 register_toolchains("@toolchains_llvm_bootstrapped//toolchain:all")

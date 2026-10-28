@@ -1,0 +1,25 @@
+load("@buildifier_prebuilt//:rules.bzl", "buildifier")
+
+_EXCLUDE = [
+    "./.git/*",
+    "./.lab/*",
+    "./bazel-*",
+    "./examples/bazel/bazel-*",
+    "./tui/target/*",
+]
+
+# bazel run //tools:buildifier formats and fixes lint in place.
+buildifier(
+    name = "buildifier",
+    exclude_patterns = _EXCLUDE,
+    lint_mode = "fix",
+    mode = "fix",
+)
+
+# bazel run //tools:buildifier.check fails on unformatted files or lint.
+buildifier(
+    name = "buildifier.check",
+    exclude_patterns = _EXCLUDE,
+    lint_mode = "warn",
+    mode = "check",
+)
