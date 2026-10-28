@@ -1,14 +1,8 @@
 load("@aspect_bazel_lib//lib:write_source_files.bzl", "write_source_files")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+load("//bazel:constraints.bzl", "LINUX_X86_64")
 
 package(default_visibility = ["//visibility:public"])
-
-# Repository-relative labels allow this package to be used through Bzlmod.
-# Only Linux x86_64 is currently supported by the parent toolchain setup.
-_LINUX_X86_64 = [
-    "@platforms//cpu:x86_64",
-    "@platforms//os:linux",
-]
 
 exports_files([
     "Cargo.Bazel.lock",
@@ -35,7 +29,7 @@ rust_library(
     crate_root = "src/lib.rs",
     compile_data = ["//docs/evidence/seastone2:ixp-lab-sw2-sanitized.json"],
     edition = "2021",
-    target_compatible_with = _LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,
     version = "0.1.0",
     deps = [
         "@saiserver_crates//:crossterm",
@@ -53,7 +47,7 @@ rust_binary(
     srcs = ["src/main.rs"],
     crate_name = "sai_tui_bin",
     edition = "2021",
-    target_compatible_with = _LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,
     version = "0.1.0",
     deps = [
         ":sai_tui",
@@ -65,7 +59,7 @@ rust_binary(
 rust_test(
     name = "unit_tests",
     crate = ":sai_tui",
-    target_compatible_with = _LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,
 )
 
 rust_test(
@@ -79,7 +73,7 @@ rust_test(
     # also handles ../<repo>/... when this package is an external dependency.
     data = [":sai-tui"],
     rustc_env = {"CARGO_BIN_EXE_sai-tui": "$(rootpath :sai-tui)"},
-    target_compatible_with = _LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,
     deps = [
         ":sai_tui",
         "@saiserver_crates//:serde_json",
@@ -93,7 +87,7 @@ rust_test(
     srcs = ["tests/safety.rs"],
     crate_name = "safety_test",
     edition = "2021",
-    target_compatible_with = _LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,
     deps = [":sai_tui"],
 )
 
@@ -103,7 +97,7 @@ rust_test(
     srcs = ["tests/config_apply.rs"],
     crate_name = "config_apply_test",
     edition = "2021",
-    target_compatible_with = _LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,
     deps = [":sai_tui"],
 )
 

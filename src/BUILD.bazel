@@ -1,5 +1,6 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("//bazel:constraints.bzl", "LINUX")
 load("//bazel:copts.bzl", "SAISERVER_COPTS")
 
 package(default_visibility = ["//visibility:public"])
@@ -55,7 +56,7 @@ cc_library(
     deps = ["@saiserver_sai//:headers"],
     copts = SAISERVER_COPTS,
     linkopts = ["-ldl", "-pthread"],
-    target_compatible_with = ["@platforms//os:linux"],
+    target_compatible_with = LINUX,
 )
 
 cc_library(
@@ -80,5 +81,5 @@ cc_library(
 cc_binary(
     name = "saiserver",
     deps = [":server_lib", ":server_main", ":sai_dynamic"],
-    target_compatible_with = ["@platforms//os:linux"],
+    target_compatible_with = LINUX,
 )
