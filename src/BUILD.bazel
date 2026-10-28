@@ -1,5 +1,6 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("//bazel:copts.bzl", "SAISERVER_COPTS")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -9,7 +10,7 @@ cc_library(
     hdrs = ["interface_address.h"],
     strip_include_prefix = ".",
     deps = ["@saiserver_sai//:headers"],
-    copts = ["-std=c++17"],
+    copts = SAISERVER_COPTS,
     linkopts = ["-pthread"],
 )
 
@@ -19,7 +20,7 @@ cc_library(
     hdrs = ["tui_rpc.h"],
     strip_include_prefix = ".",
     deps = [":interface_address", "//idl:switch_sai_cc", "@saiserver_sai//:headers"],
-    copts = ["-std=c++17"],
+    copts = SAISERVER_COPTS,
     linkopts = ["-pthread"],
 )
 
@@ -44,7 +45,7 @@ cc_library(
     strip_include_prefix = ".",
     deps = [":bounded_rpc_processor", ":rpc_listener_api", ":tui_rpc"],
     # The legacy handler predates override annotations; retain other warnings.
-    copts = ["-std=c++17", "-Wno-inconsistent-missing-override"],
+    copts = SAISERVER_COPTS + ["-Wno-inconsistent-missing-override"],
 )
 
 # The implementation is chosen explicitly at deployment, never via host -lsai.
@@ -52,7 +53,7 @@ cc_library(
     name = "sai_dynamic",
     srcs = ["sai_dynamic.cpp"],
     deps = ["@saiserver_sai//:headers"],
-    copts = ["-std=c++17"],
+    copts = SAISERVER_COPTS,
     linkopts = ["-ldl", "-pthread"],
     target_compatible_with = ["@platforms//os:linux"],
 )
@@ -63,7 +64,7 @@ cc_library(
     hdrs = ["notifications.h"],
     strip_include_prefix = ".",
     deps = ["@saiserver_sai//:headers"],
-    copts = ["-std=c++17"],
+    copts = SAISERVER_COPTS,
 )
 
 # The server's main(), without the listener or SDK it links against. The
@@ -72,7 +73,7 @@ cc_library(
     name = "server_main",
     srcs = ["saiserver.cpp"],
     deps = [":notifications", ":rpc_listener_api", ":tui_rpc", "@saiserver_sai//:headers"],
-    copts = ["-std=c++17"],
+    copts = SAISERVER_COPTS,
     linkopts = ["-pthread"],
 )
 

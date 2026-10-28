@@ -2,6 +2,7 @@ load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//bazel:copts.bzl", "SAISERVER_TEST_COPTS")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -9,7 +10,7 @@ cc_test(
     name = "server_test",
     srcs = ["server/tui_rpc_test.cpp"],
     deps = ["//src:tui_rpc"],
-    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-UNDEBUG"],
+    copts = SAISERVER_TEST_COPTS,
 )
 
 cc_library(
@@ -18,21 +19,21 @@ cc_library(
     srcs = ["server/fake_sdk.cpp"],
     hdrs = ["server/fake_sdk.h"],
     deps = ["//src:interface_address"],
-    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-UNDEBUG"],
+    copts = SAISERVER_TEST_COPTS,
 )
 
 cc_test(
     name = "interface_address_test",
     srcs = ["server/interface_address_test.cpp"],
     deps = [":fake_sdk"],
-    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-UNDEBUG"],
+    copts = SAISERVER_TEST_COPTS,
 )
 
 cc_test(
     name = "interface_address_rpc_test",
     srcs = ["server/interface_address_rpc_test.cpp"],
     deps = [":fake_sdk", "//src:bounded_rpc_processor", "//src:tui_rpc"],
-    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-UNDEBUG"],
+    copts = SAISERVER_TEST_COPTS,
 )
 
 # Real server main linked against the fixture's fake SDK and RPC listener.
@@ -47,7 +48,7 @@ cc_binary(
         "//src:server_main",
         "//src:tui_rpc",
     ],
-    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter", "-UNDEBUG"],
+    copts = SAISERVER_TEST_COPTS,
 )
 
 sh_test(
@@ -61,7 +62,7 @@ cc_test(
     name = "fdb_events_test",
     srcs = ["test_fdb_events.cpp"],
     deps = ["//src:notifications"],
-    copts = ["-std=c++17", "-UNDEBUG"],
+    copts = SAISERVER_TEST_COPTS,
 )
 
 cc_binary(
@@ -70,7 +71,7 @@ cc_binary(
     srcs = ["fake_sai.cpp"],
     deps = ["//:sai_headers"],
     linkshared = True,
-    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
+    copts = SAISERVER_TEST_COPTS,
 )
 
 cc_binary(
@@ -80,7 +81,7 @@ cc_binary(
     deps = ["//:sai_headers"],
     linkshared = True,
     local_defines = ["FAKE_SAI_OMIT_LOG_SET"],
-    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
+    copts = SAISERVER_TEST_COPTS,
 )
 
 cc_binary(
@@ -89,7 +90,7 @@ cc_binary(
     srcs = ["fake_sai.cpp", "server/fake_optional_sai.cpp"],
     deps = ["//:sai_headers"],
     linkshared = True,
-    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
+    copts = SAISERVER_TEST_COPTS,
 )
 
 cc_test(
@@ -102,7 +103,7 @@ cc_test(
         "$(rootpath :incomplete_fake_sai.so)",
         "$(rootpath :optional_fake_sai.so)",
     ],
-    copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
+    copts = SAISERVER_TEST_COPTS,
 )
 
 sh_test(
