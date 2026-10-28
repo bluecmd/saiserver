@@ -30,7 +30,9 @@ and test actions have networking disabled. Build/test/run require linux-sandbox
 without fallback. The engine needs support for nested unprivileged user/mount
 namespaces; seccomp and proc/sys path masking are relaxed for this purpose.
 The container still has its own PID namespace, a read-only root, and no added
-capabilities, privileged mode, devices, engine socket, host home, or SDK mounts.
+capabilities, privileged mode, engine socket, host home, or SDK mounts. The only
+device is /dev/net/tun (when the host has it), for the system tests' TAP
+interfaces; those can only be created in namespaces the tests own.
 EOF
 }
 
@@ -143,6 +145,11 @@ case $engine_kind in
         --env NO_PROXY= --env http_proxy= --env https_proxy= --env ftp_proxy=
         --env all_proxy= --env no_proxy=) ;;
 esac
+# TUN/TAP creation requires CAP_NET_ADMIN over the target network namespace,
+# so this reaches only the namespaces the system tests create themselves.
+if [[ -c /dev/net/tun ]]; then
+    runtime+=(--device /dev/net/tun)
+fi
 # Preserve terminal semantics only for an interactive "run". TERM is runtime
 # input; strict action environments do not inherit it during compilation.
 if [[ $command_name == run && -t 0 && -t 1 ]]; then

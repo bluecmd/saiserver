@@ -36,6 +36,18 @@ flatten(
     ],
 )
 
+cc_binary(
+    name = "fdb_learning",
+    testonly = True,
+    srcs = ["fdb_learning.cc"],
+    copts = SAISERVER_TEST_COPTS,
+    target_compatible_with = LINUX_X86_64,
+    deps = [
+        "//idl:switch_sai_cc",
+        "@saiserver_sai//:headers",
+    ],
+)
+
 rust_binary(
     name = "docs_workflows",
     testonly = True,
@@ -86,6 +98,34 @@ sh_test(
     data = _VS + [
         ":docs_workflows",
         "//docs:tui.md",
+    ],
+    target_compatible_with = LINUX_X86_64,
+    deps = ["@rules_shell//shell/runfiles"],
+)
+
+_VS_FDB = [label if label != "vs.profile" else "vs_fdb.profile" for label in _VS]
+
+# Frames on a port's veth are learned, moved and flushed via SAI notifications.
+# Needs /dev/net/tun: libsaivs only learns on ports with TAP host interfaces.
+sh_test(
+    name = "vs_fdb_learning_test",
+    size = "medium",
+    srcs = ["vs_test.sh"],
+    args = ["$(rlocationpath %s)" % label for label in _VS_FDB] + [
+        "--bind",
+        "$(rlocationpath :fdb_learning):/systest/bin/fdb_learning",
+        "--bind",
+        "$(rlocationpath :lanemap.ini):/systest/lanemap.ini",
+        "--",
+        "--veth",
+        "eth1",
+        "--veth",
+        "eth2",
+        "/systest/bin/fdb_learning",
+    ],
+    data = _VS_FDB + [
+        "lanemap.ini",
+        ":fdb_learning",
     ],
     target_compatible_with = LINUX_X86_64,
     deps = ["@rules_shell//shell/runfiles"],

@@ -23,7 +23,9 @@ but has not been locally exercised. Linux sandbox namespaces must work: the
 launcher fails rather than falling back, and rejects execution-strategy override
 flags. Nested namespaces require relaxed seccomp and proc/sys masking; the
 container remains non-root, capability-free, read-only and privately namespaced,
-without privileged mode, added capabilities, host networking or device mounts.
+without privileged mode, added capabilities or host networking. The only device
+passed in is `/dev/net/tun`, for the system tests' TAP interfaces, which can
+only be created in network namespaces the tests themselves own.
 Use `--jobs=4` on smaller builders. The first build downloads toolchains and builds the C++
 standard library; subsequent builds use ordinary Bazel caching. Network is
 needed for the initial **image/repository fetch**, not build actions.
@@ -306,9 +308,18 @@ readback for each; `# -> LABEL` comments there bind the returned keys for later
 commands. It then removes everything it created and verifies the removals. A
 documented example that stops working therefore fails the build.
 
-libsaivs keeps a metadata-validated object model; it does **not** forward
-packets, so this covers the management plane (validation, object references,
-getters, readback and removal), not data-plane behaviour.
+`vs_fdb_learning_test` covers the notification path: two switch ports are backed
+by veth pairs (`lanemap.ini`, `vs_fdb.profile`), the test creates their netdev
+host interfaces through the legacy RPC API, injects frames on a veth peer, and
+requires the learned entry to reach the server's FDB notification handler and
+the getter-verified inventory (and the legacy FDB list). A flush must remove it.
+libsaivs learns only on ports with TAP host interfaces, so this test needs
+`/dev/net/tun` (which `bazelw` passes through).
+
+libsaivs keeps a metadata-validated object model and learns MACs, but it does
+**not** forward packets, so these tests cover the management and notification
+planes (validation, object references, getters, readback, removal, FDB
+events), not data-plane behaviour.
 
 How it runs, without root or a container engine:
 
@@ -333,6 +344,9 @@ Known libsaivs limitations, pinned so a change is noticed:
   and they identify the table, so the ACL workflow fails at its first
   `create acl_table` with `READBACK FAILED`. The test asserts exactly that
   (`--known-unsupported`) and skips the rest of that section.
+- A learned MAC seen on another port is not reported as moved (libsaivs keys
+  entries by MAC and VLAN; see sonic-net/sonic-sairedis#2114). The FDB test
+  asserts the entry stays put, so an upgrade that adds moves is noticed.
 
 To move to newer SONiC packages, download the trixie debs from a successful
 `Azure.sonic-buildimage.official.vs` build, attach them with provenance to a new
