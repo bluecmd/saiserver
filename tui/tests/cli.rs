@@ -110,8 +110,13 @@ fn server(count: usize) -> (SocketAddr, Arc<Mutex<Vec<String>>>, thread::JoinHan
     });
     (addr, log, handle)
 }
+fn sai_tui_binary() -> std::path::PathBuf {
+    let runfiles = runfiles::Runfiles::create().expect("runfiles");
+    runfiles::rlocation!(runfiles, env!("SAI_TUI_RLOCATIONPATH")).expect("sai-tui runfile")
+}
+
 fn invoke(addr: SocketAddr, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_sai-tui"))
+    Command::new(sai_tui_binary())
         .arg("--endpoint")
         .arg(addr.to_string())
         .args(args)

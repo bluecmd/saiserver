@@ -1,8 +1,8 @@
 // Standalone, hardware-free loader tests (no testing framework needed).
 // Usage: test_sai_dynamic <complete-fake-DSO> <incomplete-fake-DSO> [optional-symbol-fake-DSO]
 // The second DSO uses tests/fake_sai.cpp with -DFAKE_SAI_OMIT_LOG_SET.
-// Resolve declared runfiles arguments here; the loader itself accepts ONLY an
-// absolute filename. No test discovers or loads an installed/vendor SDK.
+// Arguments are rlocation paths, resolved here; the loader itself accepts ONLY
+// an absolute filename. No test discovers or loads an installed/vendor SDK.
 extern "C" {
 #include <sai.h>
 }
@@ -15,9 +15,12 @@ extern "C" {
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include "rules_cc/cc/runfiles/runfiles.h"
 
 #define CHECK(condition) do { if (!(condition)) { \
     std::fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #condition); \
@@ -96,8 +99,11 @@ void run_case(const char* name, const std::function<void()>& body,
     std::printf("PASS %s\n", name);
 }
 
-std::string absolute_runfile(const char* path) {
-    char* absolute = realpath(path, nullptr);
+std::string absolute_runfile(const char* rlocationpath) {
+    using rules_cc::cc::runfiles::Runfiles;
+    static const std::unique_ptr<Runfiles> runfiles(Runfiles::CreateForTest(BAZEL_CURRENT_REPOSITORY));
+    CHECK(runfiles != nullptr);
+    char* absolute = realpath(runfiles->Rlocation(rlocationpath).c_str(), nullptr);
     CHECK(absolute != nullptr);
     std::string result(absolute);
     std::free(absolute);

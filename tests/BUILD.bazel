@@ -60,8 +60,9 @@ sh_test(
     name = "startup_test",
     size = "small",
     srcs = ["server/startup_cases.sh"],
-    args = ["$(rootpath :startup_test_bin)"],
+    args = ["$(rlocationpath :startup_test_bin)"],
     data = [":startup_test_bin"],
+    deps = ["@rules_shell//shell/runfiles"],
 )
 
 cc_test(
@@ -108,9 +109,9 @@ cc_test(
     size = "small",
     srcs = ["test_sai_dynamic.cpp"],
     args = [
-        "$(rootpath :fake_sai.so)",
-        "$(rootpath :incomplete_fake_sai.so)",
-        "$(rootpath :optional_fake_sai.so)",
+        "$(rlocationpath :fake_sai.so)",
+        "$(rlocationpath :incomplete_fake_sai.so)",
+        "$(rlocationpath :optional_fake_sai.so)",
     ],
     copts = SAISERVER_TEST_COPTS,
     data = [
@@ -118,15 +119,19 @@ cc_test(
         ":incomplete_fake_sai.so",
         ":optional_fake_sai.so",
     ],
-    deps = ["//src:sai_dynamic"],
+    deps = [
+        "//src:sai_dynamic",
+        "@rules_cc//cc/runfiles",
+    ],
 )
 
 sh_test(
     name = "bazelw_test",
     size = "small",
     srcs = ["test_bazelw.sh"],
-    args = ["$(rootpath //:bazelw)"],
+    args = ["$(rlocationpath //:bazelw)"],
     data = ["//:bazelw"],
+    deps = ["@rules_shell//shell/runfiles"],
 )
 
 # Every non-manual test in this package.

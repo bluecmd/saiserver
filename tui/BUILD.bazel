@@ -55,15 +55,14 @@ rust_test(
     size = "small",
     srcs = ["tests/cli.rs"],
     crate_name = "cli_test",
-    # env! embeds a runfiles-relative path, not an execroot/host absolute path.
-    # Bazel tests start in the main repository's runfiles directory; rootpath
-    # also handles ../<repo>/... when this package is an external dependency.
     data = [":sai-tui"],
     edition = "2021",
-    rustc_env = {"CARGO_BIN_EXE_sai-tui": "$(rootpath :sai-tui)"},
+    # Resolved with the runfiles library, so it also works from other modules.
+    rustc_env = {"SAI_TUI_RLOCATIONPATH": "$(rlocationpath :sai-tui)"},
     target_compatible_with = LINUX_X86_64,
     deps = [
         ":sai_tui",
+        "@rules_rust//rust/runfiles",
         "@saiserver_crates//:serde_json",
         "@saiserver_crates//:thrift",
     ],
