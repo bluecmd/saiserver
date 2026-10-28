@@ -1,5 +1,5 @@
 {
-  "checksum": "be8447e2bc96d5a919fd91a9d534b8cbb2bdd413bc075abdcc95cc7a0d36b3de",
+  "checksum": "52a0aa9091c7ea3dd9682cdacdb34fb6100691ef73eb1d33d7b3b6dfd8ecf48f",
   "conditions": {
     "aarch64-pc-windows-gnullvm": [],
     "cfg(all(any(target_arch = \"x86_64\", target_arch = \"arm64ec\"), target_env = \"msvc\", not(windows_raw_dylib)))": [],
@@ -1029,6 +1029,57 @@
         }
       ],
       "version": "0.24.1"
+    },
+    "direct-cargo-bazel-deps 0.0.1": {
+      "common_attrs": {
+        "deps": [
+          {
+            "id": "clap 4.6.7",
+            "target": "clap"
+          },
+          {
+            "id": "crossterm 0.28.1",
+            "target": "crossterm"
+          },
+          {
+            "id": "ratatui 0.29.0",
+            "target": "ratatui"
+          },
+          {
+            "id": "serde 1.0.229",
+            "target": "serde"
+          },
+          {
+            "id": "serde_json 1.0.154",
+            "target": "serde_json"
+          },
+          {
+            "id": "shell-words 1.1.1",
+            "target": "shell_words"
+          },
+          {
+            "id": "signal-hook 0.3.18",
+            "target": "signal_hook"
+          },
+          {
+            "id": "thrift 0.25.0",
+            "target": "thrift"
+          }
+        ],
+        "edition": "2018"
+      },
+      "library_target_name": "direct_cargo_bazel_deps",
+      "name": "direct-cargo-bazel-deps",
+      "repository": null,
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "direct_cargo_bazel_deps",
+            "crate_root": ".direct_cargo_bazel_deps.rs"
+          }
+        }
+      ],
+      "version": "0.0.1"
     },
     "either 1.19.0": {
       "common_attrs": {
@@ -2673,67 +2724,6 @@
         }
       ],
       "version": "1.0.23"
-    },
-    "sai-tui 0.1.0": {
-      "common_attrs": {
-        "deps": {
-          "common": [
-            {
-              "id": "clap 4.6.7",
-              "target": "clap"
-            },
-            {
-              "id": "crossterm 0.28.1",
-              "target": "crossterm"
-            },
-            {
-              "id": "ratatui 0.29.0",
-              "target": "ratatui"
-            },
-            {
-              "id": "serde 1.0.229",
-              "target": "serde"
-            },
-            {
-              "id": "serde_json 1.0.154",
-              "target": "serde_json"
-            },
-            {
-              "id": "shell-words 1.1.1",
-              "target": "shell_words"
-            },
-            {
-              "id": "thrift 0.25.0",
-              "target": "thrift"
-            }
-          ],
-          "selects": {
-            "cfg(unix)": [
-              {
-                "id": "signal-hook 0.3.18",
-                "target": "signal_hook"
-              }
-            ]
-          }
-        },
-        "edition": "2021"
-      },
-      "library_target_name": "sai_tui",
-      "license": "Apache-2.0",
-      "license_ids": [
-        "Apache-2.0"
-      ],
-      "name": "sai-tui",
-      "repository": null,
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "sai_tui",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "0.1.0"
     },
     "scopeguard 1.2.0": {
       "common_attrs": {
@@ -4758,6 +4748,6 @@
   ],
   "direct_dev_deps": [],
   "workspace_members": {
-    "sai-tui 0.1.0": "tui"
+    "direct-cargo-bazel-deps 0.0.1": ""
   }
 }

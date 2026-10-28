@@ -1,25 +1,10 @@
-load("@aspect_bazel_lib//lib:write_source_files.bzl", "write_source_files")
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test", "rustfmt_test")
 load("//bazel:constraints.bzl", "LINUX_X86_64")
 
 # Exposed to other modules only through the aliases in //:BUILD.bazel.
 package(default_visibility = ["//:__subpackages__"])
 
-exports_files([
-    "Cargo.Bazel.lock",
-    "Cargo.lock",
-    "Cargo.toml",
-])
-
-# Cargo builds need the RPC module checked in. Its test fails if it drifts from
-# the pinned compiler's output; `bazel run //tui:update_bindings` rewrites it.
-write_source_files(
-    name = "update_bindings",
-    files = {"src/sai_tui.rs": "//idl:sai_tui_rust_codegen"},
-)
-
-# The client uses the checked-in module. The separately generated RPC crate,
-# //idl:sai_tui_rust, is deliberately independent of it.
+# The client re-exports the generated //idl:sai_tui_rust crate as `sai_tui::sai_tui`.
 rust_library(
     name = "sai_tui",
     srcs = glob(
@@ -33,6 +18,7 @@ rust_library(
     target_compatible_with = LINUX_X86_64,
     version = "0.1.0",
     deps = [
+        "//idl:sai_tui_rust",
         "@saiserver_crates//:crossterm",
         "@saiserver_crates//:ratatui",
         "@saiserver_crates//:serde",
@@ -101,6 +87,18 @@ rust_test(
     edition = "2021",
     target_compatible_with = LINUX_X86_64,
     deps = [":sai_tui"],
+)
+
+rustfmt_test(
+    name = "rustfmt_test",
+    size = "small",
+    targets = [
+        ":cli_test",
+        ":config_apply_test",
+        ":safety_test",
+        ":sai-tui",
+        ":sai_tui",
+    ],
 )
 
 # Every non-manual test in this package.

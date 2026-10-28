@@ -9,19 +9,25 @@ No server/lab deployment is performed by building or testing this crate.
 
 ## Build and test
 
-Use Rust **1.89+** (the checked-in dependency lockfile requires it):
+Bazel downloads the pinned Rust toolchain and crates (see [bazel.md](bazel.md));
+nothing needs to be installed. The commands below use a native Bazel, whose
+outputs appear under `bazel-bin/`; `./bazelw` works the same but keeps outputs in
+its cache.
 
 ```sh
-cargo build --manifest-path tui/Cargo.toml --release --locked
-./tui/target/release/sai-tui --help
+bazel build //:client
+bazel-bin/tui/sai-tui --help
 
-cargo fmt --manifest-path tui/Cargo.toml --check
-cargo clippy --manifest-path tui/Cargo.toml --locked --all-targets -- -D warnings
-cargo test --manifest-path tui/Cargo.toml --locked
+bazel test //tui:tests               # unit/integration tests and rustfmt check
+bazel build --config=clippy //tui/... # clippy, warnings are errors
+bazel run @rules_rust//:rustfmt      # reformat in place
 # Optional Unix PTY tests: connection failure, explicit reconnect, responsive
 # quit during a stalled RPC, signal exit, alternate-screen and termios restoration.
-python3 tui/tests/terminal_smoke.py tui/target/release/sai-tui
+python3 tui/tests/terminal_smoke.py bazel-bin/tui/sai-tui
 ```
+
+For rust-analyzer, generate `rust-project.json` with
+`bazel run @rules_rust//tools/rust_analyzer:gen_rust_project`.
 
 The library, socket mock server, subprocess CLI, and Ratatui test-backend tests
 need no switch or lab. They cover the wire methods and declared errors,
@@ -31,16 +37,9 @@ intervals, wrap/reset/missing/reconnect handling, and bounded history/worker inp
 PTY tests additionally need Python 3 and a Unix PTY; they make only loopback TCP
 connections.
 
-Generated Rust bindings are checked in at `tui/src/sai_tui.rs` and not modified
-by hand. To regenerate from the **unchanged** committed small IDL, from the
-repository root with Apache Thrift compiler 0.25.0:
-
-```sh
-thrift --gen rs -out tui/src idl/sai_tui.thrift
-cargo fmt --manifest-path tui/Cargo.toml --check
-```
-
-There is no Thrift compiler requirement for a normal Cargo build. Rust uses the
+The Rust bindings are generated at build time from the committed IDL by the
+pinned Apache Thrift 0.25.0 compiler (`//idl:sai_tui_rust`) and re-exported as
+`sai_tui::sai_tui`; they are not checked in. Rust uses the
 matching `thrift` 0.25 runtime; the generated service includes both the client
 and the processor used by socket tests. The inherited service dispatches these
 methods by their ordinary names, so no multiplexed service prefix is sent.
@@ -53,7 +52,7 @@ expose port 9090 to an untrusted network:
 
 ```sh
 ssh -N -L 19090:127.0.0.1:9090 user@lab-host
-./tui/target/release/sai-tui --endpoint 127.0.0.1:19090 --timeout-ms 2000
+bazel-bin/tui/sai-tui --endpoint 127.0.0.1:19090 --timeout-ms 2000
 ```
 
 The default endpoint is `127.0.0.1:9090`. `--endpoint` accepts a **numeric**
@@ -99,7 +98,7 @@ ERSPAN collector, safe apply behavior, and hardware-verification limitations.
 ## Interactive operation
 
 ```sh
-./tui/target/release/sai-tui --endpoint 127.0.0.1:9090 --interval-ms 1000
+bazel-bin/tui/sai-tui --endpoint 127.0.0.1:9090 --interval-ms 1000
 ```
 
 | Key | Action |
@@ -204,7 +203,7 @@ field help in either frontend. `get` can show additional read-only attributes.
 ### Headless operation and exit status
 
 ```sh
-SAI=./tui/target/release/sai-tui
+SAI=bazel-bin/tui/sai-tui
 $SAI --endpoint 127.0.0.1:19090 --snapshot
 $SAI --command 'help router_interface'
 $SAI --command 'get port 0x1000000000001'

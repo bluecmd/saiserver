@@ -135,6 +135,8 @@ def rust_thrift_library(name, lib, out, crate_name = None, deps = [], **kwargs):
     )
     rust_library(
         name = name,
+        # Generated code is neither rustfmt-clean nor clippy-clean.
+        tags = kwargs.pop("tags", []) + ["noclippy", "norustfmt"],
         srcs = [generated],
         crate_root = generated,
         crate_name = crate_name,

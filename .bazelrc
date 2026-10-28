@@ -25,3 +25,8 @@ test --test_output=errors
 # enabling both makes the toolchain's runtime selection ambiguous.
 build:asan --@toolchains_llvm_bootstrapped//config:asan
 build:ubsan --@toolchains_llvm_bootstrapped//config:ubsan
+
+# Rust lints, failing on any warning: bazel build --config=clippy //...
+build:clippy --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
+build:clippy --output_groups=+clippy_checks
+build:clippy --@rules_rust//rust/settings:clippy_flags=-Dwarnings

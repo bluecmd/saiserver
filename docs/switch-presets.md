@@ -184,12 +184,9 @@ preset applied.
 ## Offline verification
 
 ```sh
-cargo fmt --manifest-path tui/Cargo.toml --check
-cargo clippy --manifest-path tui/Cargo.toml --locked --all-targets -- -D warnings
-cargo test --manifest-path tui/Cargo.toml --locked
-cargo build --manifest-path tui/Cargo.toml --release --locked
-python3 tui/tests/preset_terminal_smoke.py tui/target/release/sai-tui
-./bazelw test //...
+bazel test //...
+bazel build --config=clippy //...
+python3 tui/tests/preset_terminal_smoke.py bazel-bin/tui/sai-tui
 ```
 
 The Rust suite validates the complete topology/operation plan, dependency

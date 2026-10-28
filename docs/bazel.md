@@ -51,10 +51,12 @@ when requiring full build hermeticity.
   implementation of every optional Thrift transport (SSL/HTTP/JSON/zlib/etc.).
 - **SAI 1.18.1** interface headers come from a checksum-pinned official archive,
   including experimental headers. No vendor binary is downloaded by the build.
-- `tui/Cargo.lock` pins Rust package versions/checksums;
-  `tui/Cargo.Bazel.lock` commits crate_universe's resolved graph so downstream
-  modules do not repin it. Metadata uses a downloaded, isolated Cargo/Rust tool
-  set, not a user's Cargo home.
+- Rust crates are declared with `crate.spec` in `MODULE.bazel`; there is no
+  Cargo project. `cargo-bazel-lock.json` commits crate_universe's resolved
+  graph and checksums so downstream modules do not repin it, and
+  `Cargo.Bazel.lock` (crate_universe's own Cargo-format lock) keeps transitive
+  versions stable across repins. Resolution uses a downloaded, isolated
+  Cargo/Rust tool set, not a user's Cargo home.
 - Target compilation uses `PATH=/nonexistent`. Execution-tool actions have a
   separate, fixed `/usr/bin:/bin` PATH: rules_rust bootstraps its process wrapper
   through a POSIX shell twice and copies three placeholders with Bash/cp. This detail is
@@ -83,7 +85,7 @@ the `//idl` IDL targets and `//bazel:*.bzl` are the public surface; `//src` and
 | Target | Kind / purpose |
 |---|---|
 | `//:client` | Rust `sai-tui` executable |
-| `//:client_lib` | Rust library, crate name `sai_tui`; client, commands, UI, counters and checked-in RPC module |
+| `//:client_lib` | Rust library, crate name `sai_tui`; client, commands, UI, counters; re-exports `//:thrift_rust` as `sai_tui::sai_tui` |
 | `//:server` | Standalone C++ server, with explicit runtime SDK loader |
 | `//:server_lib` | C++ RPC listener/handlers, without a vendor SDK implementation or standalone `main` |
 | `//:server_api` | Bounded C++ management backend (`tui_rpc.h`), without the legacy listener/main |
@@ -95,7 +97,7 @@ the `//idl` IDL targets and `//bazel:*.bzl` are the public surface; `//src` and
 | `//:thrift_rust_runtime` | Matching Rust `thrift` runtime, preserving trait/crate identity |
 | `//:thrift_compiler` | Source-built Thrift compiler |
 | `//:thrift_runtime` | Binary/buffered socket C++ Thrift runtime |
-| `//:tests` | All twelve project Bazel test targets |
+| `//:tests` | Every project Bazel test target |
 
 The IDL lives in `//idl`: `@saiserver//idl:sai_tui_thrift` and
 `@saiserver//idl:switch_sai_thrift` are the `thrift_library` targets (the
@@ -109,15 +111,9 @@ same version can have a different Rust crate identity and incompatible traits.
 The downstream test performs real in-memory serialization and constructs a
 generated service client using the exported runtime.
 
-The client keeps its Cargo-compatible checked-in RPC module,
-`tui/src/sai_tui.rs`. `//tui:update_bindings_test` requires it to be
-byte-identical to the pinned compiler's output; after changing the IDL, run
-`bazel run //tui:update_bindings` (natively: `bazelw` mounts the checkout
-read-only) to rewrite it. Lint and rustfmt exemptions live on the `mod`
-declaration in `lib.rs`, not in the generated file. The standalone
-`sai_tui_rpc` crate is useful without pulling in Ratatui. Its types and the
-client's nested `sai_tui::sai_tui` module are separate Rust types; use the
-matching module when passing objects to the client API.
+The client re-exports the generated `sai_tui_rpc` crate as `sai_tui::sai_tui`,
+so both paths name the same Rust types. Depend on `//:thrift_rust` alone to
+use the protocol without pulling in Ratatui.
 
 ## Downstream Bzlmod projects
 
@@ -295,7 +291,7 @@ loading; `sai_query_api_version` still queries the selected SDK itself.
 ## Verification and maintenance
 
 Project tests cover 29 Rust unit/integration cases, the existing getter-backed
-C++/FDB regressions, 12 fake-only loader scenarios, binding drift and launcher
+C++/FDB regressions, 12 fake-only loader scenarios, rustfmt and launcher
 policy guards (including symlinked HOME and forbidden execution strategies).
 All are offline/hardware-free; the CLI tests communicate only over loopback.
 
@@ -328,16 +324,20 @@ bazel test --nofetch --repository_disable_download --remote_cache= --disk_cache=
 The full-mode launcher freezes locks and mounts source read-only. Maintenance
 repins are deliberate source edits: use a writable development checkout (or a
 writable copy in the pinned image), review the changes, then verify with the
-read-only launcher. When updating Rust dependencies, update `tui/Cargo.lock`, then:
+read-only launcher. To change Rust dependencies, edit the `crate.spec` tags in
+`MODULE.bazel`, then repin (`CARGO_BAZEL_REPIN=1` re-resolves all crates within
+their specs; `CARGO_BAZEL_REPIN=thrift` only that one):
 
 ```sh
-bazel build --lockfile_mode=update --repo_env=CARGO_BAZEL_REPIN=1 //:client
+CARGO_BAZEL_REPIN=1 bazel build --lockfile_mode=update --repo_env=CARGO_BAZEL_REPIN=1 //:client
 bazel test //...
 (cd examples/bazel && bazel test --lockfile_mode=update //...)
 ```
 
 Format and lint Starlark with `bazel run //tools:buildifier` (or
-`//tools:buildifier.check` to only report). Commit the Cargo, crate_universe and both Bzlmod locks together. Do not use a
+`//tools:buildifier.check` to only report), and lint Rust with
+`bazel build --config=clippy //...`. Commit both crate_universe locks and both
+Bzlmod locks together. Do not use a
 repin environment variable during ordinary builds. Changing toolchain/SAI/Thrift
 versions also requires updating the explicit archive hashes, regenerating locks,
 and repeating the downstream and clean-sandbox checks.

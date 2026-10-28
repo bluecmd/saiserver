@@ -5,8 +5,6 @@ pub mod config;
 pub mod preset_plan;
 pub mod presets;
 pub mod rates;
-// Checked-in output of: thrift --gen rs -out tui/src idl/sai_tui.thrift
-#[allow(clippy::all)]
-#[rustfmt::skip]
-pub mod sai_tui;
+// Generated from idl/sai_tui.thrift by //idl:sai_tui_rust.
+pub use sai_tui_rpc as sai_tui;
 pub mod ui;

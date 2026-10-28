@@ -60,12 +60,15 @@ and the [separate Bzlmod consumer example](examples/bazel).
 
 ## Run the TUI
 
-Requires Rust 1.89+ and an **already running compatible saiserver**:
+Requires an **already running compatible saiserver**:
 
 ```sh
-cargo build --manifest-path tui/Cargo.toml --release --locked
-./tui/target/release/sai-tui --endpoint 127.0.0.1:9090
+bazel build //:client
+bazel-bin/tui/sai-tui --endpoint 127.0.0.1:9090
 ```
+
+With `./bazelw`, outputs stay in its cache; see
+[obtaining binaries](docs/bazel.md#obtaining-binaries-and-vendor-sdk-deployment).
 
 Use `1`–`7`/Tab for pages, `j`/`k` to select, `r` to refresh/reconnect, `:` for
 commands, `p` to load a switch preset locally, `a` to separately review applying

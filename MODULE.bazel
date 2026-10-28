@@ -16,7 +16,6 @@ bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "toolchains_llvm_bootstrapped", version = "0.5.9")
 bazel_dep(name = "boost.uuid", version = "1.89.0.bcr.2")
 bazel_dep(name = "boost.predef", version = "1.89.0.bcr.2")
-bazel_dep(name = "aspect_bazel_lib", version = "2.19.3")
 
 # Formatting/lint only; //tools is never loaded by downstream modules.
 bazel_dep(name = "buildifier_prebuilt", version = "10.1.0", dev_dependency = True)
@@ -56,15 +55,49 @@ rust_host.host_tools(
 )
 use_repo(rust_host, "saiserver_rust_host_tools")
 
+# Rust crates. Resolved versions and checksums are pinned in
+# //:cargo-bazel-lock.json; see docs/bazel.md for repinning.
 crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
-crate.from_cargo(
+crate.spec(
+    features = ["derive"],
+    package = "clap",
+    version = "4.6",
+)
+crate.spec(
+    package = "crossterm",
+    version = "0.28",
+)
+crate.spec(
+    package = "ratatui",
+    version = "0.29",
+)
+crate.spec(
+    features = ["derive"],
+    package = "serde",
+    version = "1",
+)
+crate.spec(
+    package = "serde_json",
+    version = "1",
+)
+crate.spec(
+    package = "shell-words",
+    version = "1.1",
+)
+crate.spec(
+    package = "signal-hook",
+    version = "0.3",
+)
+crate.spec(
+    package = "thrift",
+    version = "0.25",
+)
+crate.from_specs(
     name = "saiserver_crates",
-    cargo_lockfile = "//tui:Cargo.lock",
+    cargo_lockfile = "//:Cargo.Bazel.lock",
     host_tools = "@saiserver_rust_host_tools//:BUILD.bazel",
     isolated = True,
-    lockfile = "//tui:Cargo.Bazel.lock",
-    manifests = ["//tui:Cargo.toml"],
-    skip_cargo_lockfile_overwrite = True,
+    lockfile = "//:cargo-bazel-lock.json",
     supported_platform_triples = ["x86_64-unknown-linux-gnu"],
 )
 use_repo(crate, "saiserver_crates")
