@@ -12,7 +12,6 @@ cc_library(
     hdrs = ["interface_address.h"],
     copts = SAISERVER_COPTS,
     linkopts = ["-pthread"],
-    strip_include_prefix = ".",
     deps = ["@saiserver_sai//:headers"],
 )
 
@@ -22,7 +21,6 @@ cc_library(
     hdrs = ["tui_rpc.h"],
     copts = SAISERVER_COPTS,
     linkopts = ["-pthread"],
-    strip_include_prefix = ".",
     deps = [
         ":interface_address",
         "//idl:switch_sai_cc",
@@ -33,7 +31,6 @@ cc_library(
 cc_library(
     name = "bounded_rpc_processor",
     hdrs = ["bounded_rpc_processor.h"],
-    strip_include_prefix = ".",
     deps = [
         ":tui_rpc",
         "//idl:switch_sai_cc",
@@ -45,7 +42,6 @@ cc_library(
 cc_library(
     name = "rpc_listener_api",
     hdrs = ["switch_sai_rpc_server.h"],
-    strip_include_prefix = ".",
 )
 
 cc_library(
@@ -53,7 +49,6 @@ cc_library(
     srcs = ["switch_sai_rpc_server.cpp"],
     # The legacy handler predates override annotations; retain other warnings.
     copts = SAISERVER_COPTS + ["-Wno-inconsistent-missing-override"],
-    strip_include_prefix = ".",
     deps = [
         ":bounded_rpc_processor",
         ":rpc_listener_api",
@@ -79,7 +74,6 @@ cc_library(
     srcs = ["notifications.cpp"],
     hdrs = ["notifications.h"],
     copts = SAISERVER_COPTS,
-    strip_include_prefix = ".",
     deps = ["@saiserver_sai//:headers"],
 )
 

@@ -1,7 +1,7 @@
 // Reuse the packet/topology fake, not a mock responder. No sockets or SDK DSO.
-#include "fake_sdk.h"
-#include "tui_rpc.h"
-#include "bounded_rpc_processor.h"
+#include "tests/server/fake_sdk.h"
+#include "src/tui_rpc.h"
+#include "src/bounded_rpc_processor.h"
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/transport/TBufferTransports.h>
 #include <cassert>

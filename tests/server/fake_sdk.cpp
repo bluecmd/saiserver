@@ -1,5 +1,5 @@
 // Fake SAI SDK and packet builders shared by the interface_address tests.
-#include "fake_sdk.h"
+#include "tests/server/fake_sdk.h"
 
 #include <arpa/inet.h>
 #include <algorithm>

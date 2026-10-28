@@ -34,8 +34,8 @@
 #include <iostream>
 #include <string>
 #include "switch_sai_rpc.h"
-#include "tui_rpc.h"
-#include "bounded_rpc_processor.h"
+#include "src/tui_rpc.h"
+#include "src/bounded_rpc_processor.h"
 #include <thread>
 #include <condition_variable>
 #include <thrift/protocol/TBinaryProtocol.h>

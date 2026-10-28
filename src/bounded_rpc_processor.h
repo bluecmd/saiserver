@@ -2,7 +2,7 @@
 // responder's shared SAI lock. The whitelist includes reads as well as writes.
 #pragma once
 #include "switch_sai_rpc.h"
-#include "tui_rpc.h"
+#include "src/tui_rpc.h"
 #include <atomic>
 #include <thrift/TApplicationException.h>
 

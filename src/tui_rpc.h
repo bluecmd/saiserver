@@ -1,7 +1,7 @@
 // Bounded, getter-backed management service. No legacy parsers are used.
 #pragma once
 #include "sai_tui_types.h"
-#include "interface_address.h"
+#include "src/interface_address.h"
 #include <map>
 #include <string>
 #include <cstdint>

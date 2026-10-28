@@ -1,7 +1,7 @@
 #pragma once
 // Fake SAI SDK (an in-memory object graph) plus packet builders for the
 // interface_address responder tests. No SDK library, sockets or hardware.
-#include "interface_address.h"
+#include "src/interface_address.h"
 
 #include <array>
 #include <condition_variable>

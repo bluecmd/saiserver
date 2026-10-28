@@ -1,5 +1,5 @@
 // Notification view regression tests. No switch or vendor library required.
-#include "notifications.h"
+#include "src/notifications.h"
 #include <cassert>
 
 std::vector<std::pair<sai_fdb_entry_t, sai_object_id_t>> gFdbMap;

@@ -2,7 +2,7 @@
 extern "C" {
 #include <sai.h>
 }
-#include <switch_sai_rpc_server.h>
+#include "src/switch_sai_rpc_server.h"
 #include <sai_tui_types.h>
 #include <switch_sai_rpc.h>
 #include <mutex>

@@ -1,4 +1,4 @@
-#include "interface_address.h"
+#include "src/interface_address.h"
 #include <arpa/inet.h>
 #include <algorithm>
 #include <atomic>
@@ -11,7 +11,7 @@
 #include <map>
 #include <thread>
 
-#include "fake_sdk.h"
+#include "tests/server/fake_sdk.h"
 
 using namespace fake_sdk;
 namespace {

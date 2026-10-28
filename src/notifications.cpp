@@ -1,4 +1,4 @@
-#include "notifications.h"
+#include "src/notifications.h"
 
 #include <algorithm>
 #include <cstring>

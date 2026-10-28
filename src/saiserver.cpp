@@ -22,9 +22,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include "switch_sai_rpc.h"
-#include "notifications.h"
-#include "switch_sai_rpc_server.h"
-#include "tui_rpc.h"
+#include "src/notifications.h"
+#include "src/switch_sai_rpc_server.h"
+#include "src/tui_rpc.h"
 #include <atomic>
 #include <chrono>
 

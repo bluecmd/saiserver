@@ -88,7 +88,7 @@ the `//idl` IDL targets and `//bazel:*.bzl` are the public surface; `//src` and
 | `//:client_lib` | Rust library, crate name `sai_tui`; client, commands, UI, counters; re-exports `//:thrift_rust` as `sai_tui::sai_tui` |
 | `//:server` | Standalone C++ server, with explicit runtime SDK loader |
 | `//:server_lib` | C++ RPC listener/handlers, without a vendor SDK implementation or standalone `main` |
-| `//:server_api` | Bounded C++ management backend (`tui_rpc.h`), without the legacy listener/main |
+| `//:server_api` | Bounded C++ management backend (`#include "src/tui_rpc.h"`), without the legacy listener/main |
 | `//:sai_loader` | Optional SDK-neutral C entrypoint loader, for embedding applications |
 | `//:sai_headers` | `CcInfo` for official SAI headers; `#include <sai.h>` etc. |
 | `//:thrift_idl` | `thrift_library` (`ThriftInfo`) for `switch_sai.thrift` and its `sai_tui.thrift` include |
@@ -208,6 +208,9 @@ without starting a listener or touching hardware. Its failing API provider is
 **test-only**, never a production default. The bounded `server_api` backend
 instead accepts the switch ID explicitly.
 
+Project headers are included by their repository path, e.g.
+`#include "src/switch_sai_rpc_server.h"`; generated Thrift headers by file name
+(`#include "switch_sai_rpc.h"`), since Thrift's own output includes them that way.
 SAI's C headers require `extern "C" { #include <sai.h> }` when used from C++
 (write the include on its own line, as in the consumer). A vendor `cc_import`
 and all of its link-time dependencies must come from declared pinned artifacts;

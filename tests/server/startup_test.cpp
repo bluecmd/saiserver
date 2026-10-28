@@ -1,9 +1,9 @@
 // Link the real server main against this fake SDK and fake RPC listener. No
 // socket is opened. All assertions exercise production CLI/lifecycle ordering.
-#include "fake_sdk.h"
-#include "notifications.h"
-#include "switch_sai_rpc_server.h"
-#include "tui_rpc.h"
+#include "tests/server/fake_sdk.h"
+#include "src/notifications.h"
+#include "src/switch_sai_rpc_server.h"
+#include "src/tui_rpc.h"
 #include <cassert>
 #include <cstdlib>
 #include <iostream>
