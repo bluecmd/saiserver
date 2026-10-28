@@ -32,6 +32,8 @@ sai_status_t failget_status = SAI_STATUS_NOT_SUPPORTED;
 sai_status_t remove_status = SAI_STATUS_SUCCESS;
 unsigned failwrite = 0;
 bool failcreate = false, wrongread = false, keepremoved = false;
+// Answer size queries (count 0, NULL list) with SUCCESS, as SONiC libsaivs does.
+bool size_query_success = false, oversize_success = false;
 std::set<sai_stat_id_t> unsupported_stats;
 sai_stat_id_t broken_stat = UINT32_MAX;
 sai_status_t query_status = SAI_STATUS_SUCCESS;
@@ -84,7 +86,7 @@ sai_status_t read(Record& r, uint32_t n, sai_attribute_t* a) {
     if (a->id == failget && (failget_kind.empty() || failget_kind == r.kind)) return failget_status;
     if (r.lists.count(a->id)) {
         auto& v = r.lists.at(a->id); auto cap = a->value.objlist.count; a->value.objlist.count = v.size();
-        if (cap < v.size()) return SAI_STATUS_BUFFER_OVERFLOW;
+        if (cap < v.size()) return size_query_success && cap == 0 ? SAI_STATUS_SUCCESS : SAI_STATUS_BUFFER_OVERFLOW;
         if (!v.empty()) std::memcpy(a->value.objlist.list, v.data(), v.size() * sizeof(sai_object_id_t));
         return SAI_STATUS_SUCCESS;
     }
@@ -92,7 +94,8 @@ sai_status_t read(Record& r, uint32_t n, sai_attribute_t* a) {
     if (r.kind == "vlan" && a->id == SAI_VLAN_ATTR_MEMBER_LIST) { a->value.objlist.count = 0; return SAI_STATUS_SUCCESS; }
     if (r.kind == "port" && a->id == SAI_PORT_ATTR_HW_LANE_LIST) {
         auto cap = a->value.u32list.count; a->value.u32list.count = 2;
-        if (cap < 2) return SAI_STATUS_BUFFER_OVERFLOW;
+        if (oversize_success) { a->value.u32list.count = cap + 1; return SAI_STATUS_SUCCESS; } // Claims more than fits.
+        if (cap < 2) return size_query_success && cap == 0 ? SAI_STATUS_SUCCESS : SAI_STATUS_BUFFER_OVERFLOW;
         a->value.u32list.list[0] = 11; a->value.u32list.list[1] = 12; return SAI_STATUS_SUCCESS;
     }
     a->value = r.values[a->id];
@@ -622,6 +625,13 @@ void inventory_counters() {
     failget = SAI_PORT_ATTR_SPEED; tui_rpc::snapshot(inv, 1); assert(inv.warnings.size() == 3); failget = UINT32_MAX;
     failget = SAI_SWITCH_ATTR_SRC_MAC_ADDRESS; tui_rpc::snapshot(inv, 1);
     assert(inv.objects.size() == 8 && inv.warnings.size() == 3); failget = UINT32_MAX;
+    // SUCCESS for a size query is accepted; SUCCESS above a real capacity is not.
+    size_query_success = true; tui_rpc::snapshot(inv, 1);
+    assert(inv.objects.size() == 9 && inv.warnings.size() == 2);
+    sai_tui::Object port; tui_rpc::get(port, 1, "port", "5"); assert(port.attributes.at("lanes") == "11,12");
+    size_query_success = false; oversize_success = true;
+    error([&] { tui_rpc::get(port, 1, "port", "5"); }, SAI_STATUS_FAILURE, "exceeds supplied capacity");
+    oversize_success = false;
     std::map<std::string, int64_t> c; tui_rpc::port_counters(c, 1, "5");
     assert(c.size() == 8 && c.at("in_octets") == -1 && c.at("in_packets") == 9);
     unsupported_stats = {SAI_PORT_STAT_IF_OUT_ERRORS, SAI_PORT_STAT_IF_IN_MULTICAST_PKTS};

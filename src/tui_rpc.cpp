@@ -182,20 +182,28 @@ sai_status_t rawget(const std::string& kind, const Key& k, sai_attribute_t* a) {
 sai_attribute_t read(const std::string& kind, const Key& k, sai_attr_id_t id) {
     sai_attribute_t a{}; a.id = id; check(rawget(kind, k, &a), "get " + kind + " " + k.text + " attr " + std::to_string(id)); return a;
 }
-std::vector<sai_object_id_t> list(const std::string& kind, const Key& k, sai_attr_id_t id) {
-    std::vector<sai_object_id_t> v;
+// Reads a SAI list attribute, growing the buffer as the SDK reports its size.
+// The first call is a size query (count 0, NULL list): most SDKs answer
+// BUFFER_OVERFLOW, but some (e.g. SONiC's libsaivs) answer SUCCESS with the
+// required count. Any other SUCCESS above the supplied capacity is invalid.
+template <typename T, typename List>
+std::vector<T> getlist(const std::string& kind, const Key& k, sai_attr_id_t id, List sai_attribute_value_t::*member,
+                       const std::string& what) {
+    std::vector<T> v;
     for (unsigned tries = 0; tries < 4; ++tries) {
-        sai_attribute_t a{}; a.id = id; a.value.objlist.count = v.size(); a.value.objlist.list = v.empty() ? nullptr : v.data();
+        sai_attribute_t a{}; a.id = id; (a.value.*member).count = v.size(); (a.value.*member).list = v.empty() ? nullptr : v.data();
         auto s = rawget(kind, k, &a);
-        if (s == SAI_STATUS_SUCCESS) {
-            if (a.value.objlist.count > v.size()) fail(SAI_STATUS_FAILURE, "SAI list count exceeds supplied capacity");
-            v.resize(a.value.objlist.count); return v;
-        }
-        if (s != SAI_STATUS_BUFFER_OVERFLOW) check(s, "get list " + kind + " " + k.text + " attr " + std::to_string(id));
-        if (a.value.objlist.count > 65536 || a.value.objlist.count <= v.size()) fail(SAI_STATUS_FAILURE, "invalid/oversized SAI list size");
-        v.resize(a.value.objlist.count);
+        const auto count = (a.value.*member).count;
+        if (s == SAI_STATUS_SUCCESS && count <= v.size()) { v.resize(count); return v; }
+        if (s == SAI_STATUS_SUCCESS && !v.empty()) fail(SAI_STATUS_FAILURE, "SAI " + what + " count exceeds supplied capacity");
+        if (s != SAI_STATUS_SUCCESS && s != SAI_STATUS_BUFFER_OVERFLOW) check(s, "get " + what + " " + kind + " " + k.text + " attr " + std::to_string(id));
+        if (count > 65536 || count <= v.size()) fail(SAI_STATUS_FAILURE, "invalid/oversized SAI " + what + " size");
+        v.resize(count);
     }
-    fail(SAI_STATUS_FAILURE, "SAI list changed repeatedly during read");
+    fail(SAI_STATUS_FAILURE, "SAI " + what + " changed repeatedly during read");
+}
+std::vector<sai_object_id_t> list(const std::string& kind, const Key& k, sai_attr_id_t id) {
+    return getlist<sai_object_id_t>(kind, k, id, &sai_attribute_value_t::objlist, "list");
 }
 std::string oidlist(const std::vector<sai_object_id_t>& v) {
     std::string s; for (auto id : v) { if (!s.empty()) s += ','; s += hex(id); } return s;
@@ -436,17 +444,7 @@ sai_tui::Object observe(uint64_t sw, const std::string& kind, const Key& k) {
             // Missing binding is NOT an empty list or a successful verification.
             out.attributes["unavailable.egress_mirror_sessions"] = "SAI getter unsupported, status " + std::to_string(e.status);
         }
-        std::vector<uint32_t> lanes;
-        bool done = false;
-        for (unsigned tries = 0; tries < 4; ++tries) {
-            sai_attribute_t a{}; a.id = SAI_PORT_ATTR_HW_LANE_LIST; a.value.u32list.count = lanes.size(); a.value.u32list.list = lanes.empty() ? nullptr : lanes.data();
-            auto s = rawget(kind, k, &a);
-            if (s == SAI_STATUS_SUCCESS) { if (a.value.u32list.count > lanes.size()) fail(SAI_STATUS_FAILURE, "invalid lane list size"); lanes.resize(a.value.u32list.count); done = true; break; }
-            if (s != SAI_STATUS_BUFFER_OVERFLOW) check(s, "get port lanes");
-            if (a.value.u32list.count > 65536 || a.value.u32list.count <= lanes.size()) fail(SAI_STATUS_FAILURE, "invalid lane list size");
-            lanes.resize(a.value.u32list.count);
-        }
-        if (!done) fail(SAI_STATUS_FAILURE, "port lanes changed repeatedly");
+        auto lanes = getlist<uint32_t>(kind, k, SAI_PORT_ATTR_HW_LANE_LIST, &sai_attribute_value_t::u32list, "lane list");
         std::string text; for (auto n : lanes) { if (!text.empty()) text += ','; text += std::to_string(n); } out.attributes["lanes"] = text;
     }
     if (kind == "acl_table") {
