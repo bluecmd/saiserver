@@ -3,7 +3,7 @@
 From this directory:
 
 ```sh
-../../bazelw --cwd examples/bazel test //...
+bazel test //...
 ```
 
 This is an independent root module, not a package in the parent workspace.
@@ -19,4 +19,4 @@ changes; replace it with a full-commit/integrity-pinned override for production.
 
 The C++ test API provider is deliberately unsupported/test-only, not a substitute
 for a production SDK. See [docs/bazel.md](../../docs/bazel.md) for the exported
-labels, bootstrap boundary, toolchain requirements and runtime SDK setup.
+labels, hermeticity boundary, toolchain requirements and runtime SDK setup.

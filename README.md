@@ -39,19 +39,19 @@ for the full-resolution H.264 videos. [Source capture and regeneration](docs/med
 
 ## Hermetic Bazel / Bzlmod build
 
-On Linux x86_64, use the digest-pinned bootstrap (Docker or Podman):
+On Linux x86_64, with [Bazelisk](https://github.com/bazelbuild/bazelisk) as `bazel`:
 
 ```sh
-./bazelw build //:client //:server
-./bazelw test //...
+bazel build //:client //:server
+bazel test //...
 ```
 
-The bootstrap pins Bazel **9.3.1** and its Linux/Bash/coreutils environment.
-Bazel downloads pinned Rust/LLVM toolchains, Thrift sources and SAI headers;
-no installed compiler, Cargo, Thrift or vendor SDK is needed for the build.
-The standalone server requires an explicit `SAI_LIBRARY_PATH` **at runtime**.
-Native `bazel`/Bazelisk commands also work, but do not pin the host bootstrap
-userspace; use `bazelw` for the fully hermetic configuration.
+Bazelisk fetches Bazel **9.3.1** and verifies its SHA-256. Bazel downloads pinned
+Rust/LLVM toolchains, Thrift sources and SAI headers; no installed compiler,
+Thrift or vendor SDK is needed for the build. `--config=remote` runs the build on
+BuildBuddy in a digest-pinned Debian container, pinning the remaining shell
+tools too. The standalone server requires an explicit `SAI_LIBRARY_PATH`
+**at runtime**.
 
 Public targets include `@saiserver//:client_lib`, `:server_lib`, `:sai_headers`,
 `:thrift_idl`, `:thrift_cpp` and `:thrift_rust`.
@@ -66,9 +66,6 @@ Requires an **already running compatible saiserver**:
 bazel build //:client
 bazel-bin/tui/sai-tui --endpoint 127.0.0.1:9090
 ```
-
-With `./bazelw`, outputs stay in its cache; see
-[obtaining binaries](docs/bazel.md#obtaining-binaries-and-vendor-sdk-deployment).
 
 Use `1`–`7`/Tab for pages, `j`/`k` to select, `r` to refresh/reconnect, `:` for
 commands, `p` to load a switch preset locally, `a` to separately review applying
@@ -98,7 +95,7 @@ The commands below are low-level SDK setup, not prerequisites for merely
 building the Rust client. Deployments can override the unicast default switch
 MAC with `SAI_SRC_MAC=02:00:00:00:00:01`; the server prints the address selected.
 
-Build the server on a Linux x86_64 machine with `./bazelw build //:server` and
+Build the server on a Linux x86_64 machine with `bazel build -c opt //:server` and
 copy it to the switch (see [obtaining binaries](docs/bazel.md#obtaining-binaries-and-vendor-sdk-deployment)).
 It does not link against libsai; the SDK is chosen when it starts.
 

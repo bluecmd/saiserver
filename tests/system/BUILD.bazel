@@ -99,6 +99,8 @@ sh_test(
         ":docs_workflows",
         "//docs:tui.md",
     ],
+    # Needs unprivileged user namespaces (and /dev/net/tun) on the test host.
+    tags = ["no-remote-exec"],
     target_compatible_with = LINUX_X86_64,
     deps = ["@rules_shell//shell/runfiles"],
 )
@@ -127,6 +129,8 @@ sh_test(
         "lanemap.ini",
         ":fdb_learning",
     ],
+    # Needs unprivileged user namespaces (and /dev/net/tun) on the test host.
+    tags = ["no-remote-exec"],
     target_compatible_with = LINUX_X86_64,
     deps = ["@rules_shell//shell/runfiles"],
 )
@@ -145,6 +149,8 @@ sh_test(
         "/systest/sdk_exception.sh",
     ],
     data = _VS + ["sdk_exception.sh"],
+    # Needs unprivileged user namespaces (and /dev/net/tun) on the test host.
+    tags = ["no-remote-exec"],
     target_compatible_with = LINUX_X86_64,
     deps = ["@rules_shell//shell/runfiles"],
 )

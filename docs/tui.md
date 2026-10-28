@@ -10,9 +10,7 @@ No server/lab deployment is performed by building or testing this crate.
 ## Build and test
 
 Bazel downloads the pinned Rust toolchain and crates (see [bazel.md](bazel.md));
-nothing needs to be installed. The commands below use a native Bazel, whose
-outputs appear under `bazel-bin/`; `./bazelw` works the same but keeps outputs in
-its cache.
+nothing needs to be installed. Outputs appear under `bazel-bin/`.
 
 ```sh
 bazel build //:client

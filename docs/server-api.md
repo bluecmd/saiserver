@@ -475,10 +475,10 @@ adapter (`//:server_lib`) and the server from pinned sources; see
 
 ```sh
 # No vendor library or hardware is used by these tests:
-./bazelw test //tests:tests
+bazel test //tests:tests
 # Optionally under a sanitizer from the hermetic toolchain (one at a time):
-./bazelw test --config=asan //tests:tests
-./bazelw test --config=ubsan //tests:tests
+bazel test --config=asan //tests:tests
+bazel test --config=ubsan //tests:tests
 ```
 
 The stub suite tests strict prevalidation without SAI queries, finite attribute
@@ -500,7 +500,7 @@ replacement/detach, speed marshalling, exact MAC/TCP ACL fields and masks,
 MAC-only/non-IP table construction, independent deny entries, malformed and
 unsupported inputs, original errors, partial writes and failed readback. Local
 SAI 1.18.1 headers (`saimirror.h`, `saiport.h`, `saiacl.h`) were inspected; the
-pinned Bazel build uses the same release, so `./bazelw test //tests:tests`
+pinned Bazel build uses the same release, so `bazel test //tests:tests`
 reproduces this coverage.
 
 This extension has **not** been deployed or tested against live ASICs. No

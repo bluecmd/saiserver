@@ -125,14 +125,5 @@ cc_test(
     ],
 )
 
-sh_test(
-    name = "bazelw_test",
-    size = "small",
-    srcs = ["test_bazelw.sh"],
-    args = ["$(rlocationpath //:bazelw)"],
-    data = ["//:bazelw"],
-    deps = ["@rules_shell//shell/runfiles"],
-)
-
 # Every non-manual test in this package.
 test_suite(name = "tests")

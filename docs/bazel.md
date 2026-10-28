@@ -1,40 +1,44 @@
 # Hermetic Bazel / Bzlmod build
 
 The supported build host/target is **Linux x86_64**, using **Bazel 9.3.1**.
-Use `./bazelw` for the fully pinned bootstrap: it runs Bazel inside the
-digest-pinned Linux image defined in [bootstrap.Dockerfile](../bazel/bootstrap.Dockerfile),
-including the Bash/coreutils used internally by Bazel/rules_rust. The Bazel
-binary itself is SHA-256-pinned. No floating package installation is involved.
-
-Bazel is the only build system. It does not use an installed Rust/C++
-compiler, Thrift, or SAI SDK.
+Run Bazel through [Bazelisk](https://github.com/bazelbuild/bazelisk): it reads
+`.bazelversion` and verifies the downloaded binary against the SHA-256 in
+`.bazeliskrc`. Bazel is the only build system; it does not use an installed
+Rust/C++ compiler, Thrift, or SAI SDK.
 
 ## Build and test
 
 ```sh
-./bazelw build //:client //:server
-./bazelw test //...
-./bazelw run //:client -- --help
+bazel build //:client //:server
+bazel test //...
+bazel run //:client -- --help
 ```
 
-The launcher prefers **Podman**, which is tested here. Set
-`BAZELW_CONTAINER_ENGINE=docker` to select Docker; that code path is implemented
-but has not been locally exercised. Linux sandbox namespaces must work: the
-launcher fails rather than falling back, and rejects execution-strategy override
-flags. Nested namespaces require relaxed seccomp and proc/sys masking; the
-container remains non-root, capability-free, read-only and privately namespaced,
-without privileged mode, added capabilities or host networking. The only device
-passed in is `/dev/net/tun`, for the system tests' TAP interfaces, which can
-only be created in network namespaces the tests themselves own.
-Use `--jobs=4` on smaller builders. The first build downloads toolchains and builds the C++
-standard library; subsequent builds use ordinary Bazel caching. Network is
-needed for the initial **image/repository fetch**, not build actions.
+The first build downloads toolchains and builds the C++ standard library;
+subsequent builds use ordinary Bazel caching. Every action runs in
+`linux-sandbox` without network access (`.bazelrc`). The system tests also need
+unprivileged user namespaces and `/dev/net/tun` on the test host.
 
-Native `bazel build //:client //:server` and `bazel test //...` also work with
-Bazel 9.3.1 (or Bazelisk), but then Bash/coreutils and the compiler executables'
-basic Linux userspace come from the host. That is **not** the fully pinned
-bootstrap configuration; use `bazelw` or an equivalently pinned execution image
-when requiring full build hermeticity.
+Locally, the few shell tools Bazel itself needs (Bash/coreutils for its test
+harness and rules_rust's bootstrap; see below) come from the host. For a fully
+pinned execution environment, use remote execution.
+
+### Remote execution
+
+```sh
+bazel test --config=remote //...
+```
+
+`--config=remote` runs actions on BuildBuddy (`argocd-apps/apps/buildbuddy`),
+uses its cache, and streams the invocation to its UI. The execution platform
+`//platforms:remote_linux_x86_64` pins every action's container to the official
+Debian image **by digest**, with networking off, so the shell tools are identical
+on every run. Tests tagged `no-remote-exec` (the system tests, which need local
+kernel features) still run in the local sandbox. The executor pulls the image
+from Docker Hub once and then caches it. Anonymous builds are accepted. If
+`100.99.0.75` is unreachable, forward the service with
+`kubectl -n buildbuddy port-forward svc/buildbuddy 1985:1985` and override the
+three endpoints with `grpc://localhost:1985`.
 
 ### What is pinned / what “hermetic” covers
 
@@ -63,17 +67,16 @@ when requiring full build hermeticity.
   separate, fixed `/usr/bin:/bin` PATH: rules_rust bootstraps its process wrapper
   through a POSIX shell twice and copies three placeholders with Bash/cp. This detail is
   why merely selecting hermetic Rust/LLVM toolchains is not sufficient by itself.
-- `bazelw` pins those bootstrap tools, the Linux userspace and Bazel itself in
-  its immutable image. The checkout is read-only and only a dedicated build
-  cache is writable; no host home, SDK installation or build environment is
-  imported. Its build/test commands require `linux-sandbox`.
+- Bazel itself is pinned by `.bazelversion` plus Bazelisk's SHA-256 check.
+  With `--config=remote`, those bootstrap tools come from the digest-pinned
+  Debian image; locally they come from the host.
 - All configurations fix the locale/timezone, disable stamping and disable
   action network access. Standard test actions, **including test executables
   and subprocesses as well as Bazel's launcher/XML harness**, receive
-  `/usr/bin:/bin`; in full mode these tools are from the pinned image.
+  `/usr/bin:/bin`; with `--config=remote` these tools are from the pinned image.
 
-**Runtime boundaries:** the host kernel/container engine is a bootstrap
-prerequisite, not an OS image produced by this project. Built programs target
+**Runtime boundaries:** the host kernel is a prerequisite, not an OS image
+produced by this project. Built programs target
 glibc rather than being fully static system images. A vendor SDK, switch
 configuration, terminal and network are **runtime inputs**, not hermetic build
 inputs. This does not claim hermetic execution of ASIC software.
@@ -125,13 +128,12 @@ libraries, and generates/compiles a new protocol importing our IDL. Run it from
 the repository root with:
 
 ```sh
-./bazelw --cwd examples/bazel test //... @saiserver//tui:cli_test
+(cd examples/bazel && bazel test //... @saiserver//tui:cli_test)
 ```
 
-The launcher always defaults to the checkout root; use `--cwd` for a nested
-workspace even when invoking the script from that directory. For another
-project, copy the bootstrap Dockerfile and launcher into that project's checkout,
-or use the same pinned execution image in its build infrastructure.
+For a fully pinned execution environment, another project can reuse
+`@saiserver//platforms:remote_linux_x86_64` or define its own digest-pinned
+execution platform.
 
 Its `MODULE.bazel` is the starting point:
 
@@ -163,8 +165,7 @@ register_toolchains("@rust_toolchains//:all")
 Replace both placeholders with the published source commit and verified archive
 digest; this is not a usable floating URL. A full-commit `git_override` is also
 possible, but additionally requires a pinned Git executable in the repository
-fetch environment. The minimal bootstrap avoids that extra tool by using
-archives. The example's local override is solely for testing this checkout,
+fetch environment; archives avoid that extra tool. The example's local override is solely for testing this checkout,
 not an implicit dependency on a developer machine.
 
 Dependency `.bazelrc` files are **not inherited**. Copy this repository's
@@ -250,22 +251,15 @@ Thrift lookup.
 
 ## Obtaining binaries and vendor SDK deployment
 
-The launcher deliberately keeps the checkout read-only, including convenience
-symlinks. Outputs live in `BAZELW_CACHE_DIR` (default
-`$HOME/.cache/saiserver-bazel-bootstrap`). After building, obtain the host path:
+After `bazel build -c opt //:client //:server` (with or without
+`--config=remote`), copy the binaries out of `bazel-bin`:
 
 ```sh
-container_bin=$(./bazelw info bazel-bin)
-cache=${BAZELW_CACHE_DIR:-$HOME/.cache/saiserver-bazel-bootstrap}
-host_bin="$cache/${container_bin#/cache/}"
-cp "$host_bin/tui/sai-tui" ./sai-tui
-cp "$host_bin/src/saiserver" ./saiserver
+cp bazel-bin/tui/sai-tui bazel-bin/src/saiserver /destination/
 ```
 
-Run/deploy those binaries in the intended terminal/SDK environment. The builder
-does not import a host SDK or automatically expose host-local RPC listeners.
-`bazelw run` can allocate a TTY for interactive runs, but localhost is the
-container's network namespace, not the host's.
+Run/deploy those binaries in the intended terminal/SDK environment. The build
+does not import a host SDK.
 
 
 The Bazel standalone server does not link against `libsai` while building.
@@ -336,7 +330,7 @@ host interfaces through the legacy RPC API, injects frames on a veth peer, and
 requires the learned entry to reach the server's FDB notification handler and
 the getter-verified inventory (and the legacy FDB list). A flush must remove it.
 libsaivs learns only on ports with TAP host interfaces, so this test needs
-`/dev/net/tun` (which `bazelw` passes through).
+`/dev/net/tun` on the test host.
 
 libsaivs keeps a metadata-validated object model and learns MACs, but it does
 **not** forward packets, so these tests cover the management and notification
@@ -354,7 +348,8 @@ How it runs, without root or a container engine:
 - The test unpacks the rootfs into `TEST_TMPDIR`; `nsrun` (`nsrun.cc`) then
   chroots into it inside new user, mount, network, PID, IPC and UTS
   namespaces, with only loopback networking.
-  This needs unprivileged user namespaces, which `bazelw` already requires.
+  This needs unprivileged user namespaces on the test host, so these tests are
+  tagged `no-remote-exec`.
 - `vs_switch.sh` starts the Redis instance libsaivs insists on and the server
   with `SAI_LIBRARY_PATH` pointing at libsaivs, then runs the test command.
 
@@ -378,9 +373,8 @@ snapshot timestamp needs `--lockfile_mode=update` once.
 ## Verification and maintenance
 
 Project tests cover 29 Rust unit/integration cases, the existing getter-backed
-C++/FDB regressions, 12 fake-only loader scenarios, rustfmt and launcher
-policy guards (including symlinked HOME and forbidden execution strategies).
-All are offline/hardware-free; the CLI tests communicate only over loopback.
+C++/FDB regressions, 12 fake-only loader scenarios, rustfmt checks and the
+libsaivs system tests. All are offline/hardware-free; the CLI tests communicate only over loopback.
 
 A clean native build/test passed with frozen module locks, fetch/downloads disabled,
 remote/disk caches disabled, action network disabled, target `PATH=/nonexistent`,
@@ -390,15 +384,12 @@ SHA-256 values matched the previous build. This verifies the project build
 closure, not a reproducible OS image or live SDK initialization.
 The separate consumer's C++ and Rust tests also passed, including real Rust
 serialization through the exported runtime and the external CLI runfiles test.
-The full pinned Podman bootstrap also passed the complete project suite and
-separate consumer (including the external CLI test). The consumer rebuilt
-2,188 Linux-sandbox actions. Isolation probes confirmed a read-only source,
-empty masked `.lab`, no forwarded SDK path, non-root UID/GID and no root-owned
-cache files. Docker execution remains untested.
+The complete suite also passed with `--config=remote` (2,380 remote actions;
+the system tests ran locally as tagged). A probe test confirmed that remote
+actions run in the pinned Debian image without network access.
 
-For the fully pinned configuration, repeat with `./bazelw test //...` and
-`./bazelw --cwd examples/bazel test //...`. An additional native closure probe,
-after warming repository downloads, is:
+For the fully pinned configuration, use `bazel test --config=remote //...`.
+An additional native closure probe, after warming repository downloads, is:
 
 ```sh
 bazel clean
@@ -408,10 +399,8 @@ bazel test --nofetch --repository_disable_download --remote_cache= --disk_cache=
 (cd examples/bazel && bazel test //...)
 ```
 
-The full-mode launcher freezes locks and mounts source read-only. Maintenance
-repins are deliberate source edits: use a writable development checkout (or a
-writable copy in the pinned image), review the changes, then verify with the
-read-only launcher. To change Rust dependencies, edit the `crate.spec` tags in
+Locks are frozen (`--lockfile_mode=error`), so repins are deliberate source
+edits: review the changes, then verify with `--config=remote`. To change Rust dependencies, edit the `crate.spec` tags in
 `MODULE.bazel`, then repin (`CARGO_BAZEL_REPIN=1` re-resolves all crates within
 their specs; `CARGO_BAZEL_REPIN=thrift` only that one):
 
