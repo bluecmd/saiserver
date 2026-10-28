@@ -59,6 +59,7 @@ rust_binary(
 
 rust_test(
     name = "unit_tests",
+    size = "small",
     crate = ":sai_tui",
     target_compatible_with = LINUX_X86_64,
 )
@@ -102,13 +103,5 @@ rust_test(
     deps = [":sai_tui"],
 )
 
-test_suite(
-    name = "tests",
-    tests = [
-        ":cli_test",
-        ":config_apply_test",
-        ":safety_test",
-        ":unit_tests",
-        ":update_bindings_test",
-    ],
-)
+# Every non-manual test in this package.
+test_suite(name = "tests")
