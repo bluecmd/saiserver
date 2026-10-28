@@ -63,7 +63,7 @@ lock against an external SDK client/process.
 
 ## Operational interface-address responder (explicit opt-in)
 
-Default is **off**. The standalone Makefile build uses `src/sai_dynamic.cpp`;
+Default is **off**. The standalone server (`//:server`) uses `src/sai_dynamic.cpp`;
 set `SAI_LIBRARY_PATH` to an absolute SDK DSO filename at deployment, before the
 first SAI call. No vendor library is needed to build. Required legacy entrypoints
 retain their checked, sticky dispatch. Optional `sai_get_object_key`,
@@ -169,11 +169,12 @@ destruction to keep callback state alive until OS exit. There are no automatic
 CRUD retries. The legacy diagnostic shell, when used in default/off mode, must
 return from its SDK call before its thread can be joined.
 
-Local verification: `tests/server/run.sh` covers bounded RPC CRUD/snapshot,
-memory-buffer legacy rejection, real software ARP/ND against fake SAI, production
-CLI/startup callback ordering and teardown with a fake listener (no socket).
-`tests/server/interface_address_run.sh` covers the packet/backend seams;
-`tests/server/dynamic_run.sh` builds fake DSOs to test both optional dispatch and
+Local verification: `//tests:server_test` and `//tests:interface_address_rpc_test`
+cover bounded RPC CRUD/snapshot, memory-buffer legacy rejection and real software
+ARP/ND against fake SAI; `//tests:startup_test` covers production CLI/startup
+callback ordering and teardown with a fake listener (no socket).
+`//tests:interface_address_test` covers the packet/backend seams;
+`//tests:sai_dynamic_test` builds fake DSOs to test both optional dispatch and
 SDKs missing the new symbols. Physical RPC listener interruption and hardware
 receive/TX have not been exercised by these tests.
 
@@ -457,26 +458,17 @@ fabricated by the server. The individual samples are not an atomic ASIC snapshot
 
 ## Build and offline verification
 
-Requires GNU make >= 4.3, a C++11 compiler, Thrift compiler/runtime (tested with
-0.25.0), SAI headers and, for the executable, vendor `libsai`. Grouped recursive
-codegen targets depend on **both** IDLs; generated `SaiTui` service/type objects
-and the adapter are included in `librpcserver.a`. Header dependency files prevent
-stale forwarding/IDL builds. Generated sources are not committed.
+Bazel builds the generated `SaiTui` service/types (`//idl:switch_sai_cc`), the
+adapter (`//:server_lib`) and the server from pinned sources; see
+[bazel.md](bazel.md). Generated sources are not committed, and no vendor
+`libsai` is needed to build: the server loads it at startup.
 
 ```sh
-# Installed SDK/runtime layout:
-make -j4 SAI_HEADER_DIR=/path/include/sai SAI_LIBRARY_DIR=/path/lib
-
-# Official SAI v1.15.0 checkout, archive/object compile without libsai:
-make -j4 src/obj/librpcserver.a src/obj/saiserver.o \
-  SAI_HEADER_DIR=/path/SAI/inc CPPFLAGS=-I/path/SAI/experimental
-
 # No vendor library or hardware is used by these tests:
-SAI_HEADER_DIR=/path/SAI/inc THRIFT=/path/to/thrift tests/server/run.sh
-# Non-system Thrift: additionally supply EXTRA_CPPFLAGS and EXTRA_LDFLAGS.
-# Optional, when sanitizer runtimes exist:
-SAI_HEADER_DIR=/path/SAI/inc SANITIZE_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' \
-  tests/server/run.sh
+./bazelw test //tests:tests
+# Optionally under a sanitizer from the hermetic toolchain (one at a time):
+./bazelw test --config=asan //tests:tests
+./bazelw test --config=ubsan //tests:tests
 ```
 
 The stub suite tests strict prevalidation without SAI queries, finite attribute

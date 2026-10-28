@@ -20,3 +20,8 @@ build --@toolchains_llvm_bootstrapped//config:experimental_stub_libgcc_s=True
 test --test_env=PATH=/usr/bin:/bin
 test --test_env=USER=builder
 test --test_output=errors
+
+# Sanitized builds/tests with the toolchain's own runtimes. Use one at a time:
+# enabling both makes the toolchain's runtime selection ambiguous.
+build:asan --@toolchains_llvm_bootstrapped//config:asan
+build:ubsan --@toolchains_llvm_bootstrapped//config:ubsan

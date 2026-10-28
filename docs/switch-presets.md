@@ -189,8 +189,7 @@ cargo clippy --manifest-path tui/Cargo.toml --locked --all-targets -- -D warning
 cargo test --manifest-path tui/Cargo.toml --locked
 cargo build --manifest-path tui/Cargo.toml --release --locked
 python3 tui/tests/preset_terminal_smoke.py tui/target/release/sai-tui
-SAI_HEADER_DIR=/path/to/SAI/inc tests/server/run.sh
-SAI_HEADER_DIR=/path/to/SAI/inc tests/server/interface_address_run.sh
+./bazelw test //...
 ```
 
 The Rust suite validates the complete topology/operation plan, dependency

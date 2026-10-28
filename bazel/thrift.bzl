@@ -44,8 +44,8 @@ def _thrift_codegen_impl(ctx):
     if not ctx.outputs.outs:
         fail("outs must list the generated files")
     out_dir = ctx.outputs.outs[0].dirname
-    if any([out.dirname != out_dir for out in ctx.outputs.outs]):
-        fail("all outputs must share a directory")
+    if any([not (out.dirname + "/").startswith(out_dir + "/") for out in ctx.outputs.outs]):
+        fail("the first output's directory must contain all outputs")
     info = ctx.attr.lib[ThriftInfo]
     args = ctx.actions.args()
     args.add_all(["-out", out_dir, "--gen", ctx.attr.language])
@@ -71,7 +71,7 @@ thrift_codegen = rule(
         "lib": attr.label(providers = [ThriftInfo], mandatory = True),
         "language": attr.string(mandatory = True, doc = "Generator spec, e.g. `cpp:no_skeleton` or `rs`."),
         "recursive": attr.bool(default = False, doc = "Also generate code for included files (-r)."),
-        "outs": attr.output_list(mandatory = True, doc = "Every generated file, all in one directory."),
+        "outs": attr.output_list(mandatory = True, doc = "Every generated file. The first one's directory is the output root."),
         "_compiler": attr.label(
             default = Label("@saiserver_thrift//:compiler"),
             executable = True,

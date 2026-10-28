@@ -57,7 +57,6 @@ Public targets include `@saiserver//:client_lib`, `:server_lib`, `:sai_headers`,
 `:thrift_idl`, `:thrift_cpp` and `:thrift_rust`.
 See [Bazel targets, hermeticity boundary, SDK deployment and downstream use](docs/bazel.md)
 and the [separate Bzlmod consumer example](examples/bazel).
-The existing Cargo/Make workflows remain available below.
 
 ## Run the TUI
 
@@ -96,14 +95,15 @@ The commands below are low-level SDK setup, not prerequisites for merely
 building the Rust client. Deployments can override the unicast default switch
 MAC with `SAI_SRC_MAC=02:00:00:00:00:01`; the server prints the address selected.
 
-```
-sudo apt install binutils g++ libthrift-dev make thrift-compiler libboost1.74-dev lz4
+Build the server on a Linux x86_64 machine with `./bazelw build //:server` and
+copy it to the switch (see [obtaining binaries](docs/bazel.md#obtaining-binaries-and-vendor-sdk-deployment)).
+It does not link against libsai; the SDK is chosen when it starts.
 
+```
 # Download a matching libsai for your kernel driver
 ./download-brcm-sai.sh
 
 sudo apt install ./libsaibcm*.deb
-make
 
 sudo systemctl stop swss
 sudo systemctl stop syncd
@@ -112,7 +112,7 @@ sudo rmmod linux_knet_cb
 sudo rmmod psample
 
 # copy broadcom config to config.bcm and/or modifiy sai.profile to match
-sudo ./saiserver -p sai.profile
+sudo SAI_LIBRARY_PATH=/usr/lib/libsai.so ./saiserver -p sai.profile
 ```
 
 ## Re-generate SAI Python library
@@ -241,4 +241,6 @@ drivshell>ps
 drivshell>
 ```
 
-Use `./saiclient` to set all ports to enabled.
+Use `./saiclient` to set all ports to enabled. It needs the `thrift` Python
+package and the bindings from `bazel build //idl:switch_sai_py`; set
+`SAI_THRIFT_PY` to their directory if you copied them elsewhere.

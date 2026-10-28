@@ -6,8 +6,8 @@ digest-pinned Linux image defined in [bootstrap.Dockerfile](../bazel/bootstrap.D
 including the Bash/coreutils used internally by Bazel/rules_rust. The Bazel
 binary itself is SHA-256-pinned. No floating package installation is involved.
 
-Cargo/Make remain development alternatives; Bazel does **not** wrap either
-one or use an installed Rust/C++ compiler, Thrift, or SAI SDK.
+Bazel is the only build system. It does not use an installed Rust/C++
+compiler, Thrift, or SAI SDK.
 
 ## Build and test
 
@@ -291,8 +291,6 @@ SDK lifecycle calls and statuses are forwarded, not emulated.
 Vendor-specific weak-symbol version banners may be absent with local runtime
 loading; `sai_query_api_version` still queries the selected SDK itself.
 
-The legacy Make build remains direct-linked via its existing
-`SAI_HEADER_DIR` / `SAI_LIBRARY_DIR` configuration.
 
 ## Verification and maintenance
 
