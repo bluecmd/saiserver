@@ -1,61 +1,7 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("//bazel:thrift.bzl", "thrift_codegen")
 
 package(default_visibility = ["//visibility:public"])
-
-exports_files([
-    "sai_tui.thrift",
-    "switch_sai.thrift",
-])
-
-filegroup(
-    name = "thrift_idl",
-    srcs = ["sai_tui.thrift", "switch_sai.thrift"],
-)
-
-thrift_codegen(
-    name = "cpp_generated",
-    src = "switch_sai.thrift",
-    includes = ["sai_tui.thrift"],
-    language = "cpp:no_skeleton",
-    recursive = True,
-    outs = [
-        "generated/SaiTui.cpp",
-        "generated/SaiTui.h",
-        "generated/sai_tui_types.cpp",
-        "generated/sai_tui_types.h",
-        "generated/switch_sai_rpc.cpp",
-        "generated/switch_sai_rpc.h",
-        "generated/switch_sai_types.cpp",
-        "generated/switch_sai_types.h",
-    ],
-)
-
-thrift_codegen(
-    name = "sai_tui_rs",
-    src = "sai_tui.thrift",
-    language = "rs",
-    outs = ["generated-rs/sai_tui.rs"],
-)
-
-cc_library(
-    name = "thrift_cpp",
-    srcs = [
-        "generated/SaiTui.cpp",
-        "generated/sai_tui_types.cpp",
-        "generated/switch_sai_rpc.cpp",
-        "generated/switch_sai_types.cpp",
-    ],
-    hdrs = [
-        "generated/SaiTui.h",
-        "generated/sai_tui_types.h",
-        "generated/switch_sai_rpc.h",
-        "generated/switch_sai_types.h",
-    ],
-    strip_include_prefix = "generated",
-    deps = ["@saiserver_thrift//:runtime"],
-)
 
 cc_library(
     name = "interface_address",
@@ -72,7 +18,7 @@ cc_library(
     srcs = ["tui_rpc.cpp"],
     hdrs = ["tui_rpc.h"],
     strip_include_prefix = ".",
-    deps = [":interface_address", ":thrift_cpp", "@saiserver_sai//:headers"],
+    deps = [":interface_address", "//idl:switch_sai_cc", "@saiserver_sai//:headers"],
     copts = ["-std=c++17"],
     linkopts = ["-pthread"],
 )
@@ -81,7 +27,7 @@ cc_library(
     name = "bounded_rpc_processor",
     hdrs = ["bounded_rpc_processor.h"],
     strip_include_prefix = ".",
-    deps = [":thrift_cpp", ":tui_rpc"],
+    deps = [":tui_rpc", "//idl:switch_sai_cc"],
 )
 
 # Listener entry points, split from server_lib so the startup regression can

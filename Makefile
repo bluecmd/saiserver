@@ -11,7 +11,7 @@ LDFLAGS += -L$(SAI_LIBRARY_DIR) -Wl,-rpath=$(SAI_LIBRARY_DIR)
 ODIR = ./src/obj
 SRC = ./src
 THRIFT ?= thrift
-IDL = src/switch_sai.thrift src/sai_tui.thrift
+IDL = idl/switch_sai.thrift idl/sai_tui.thrift
 CPP_SOURCES = src/gen-cpp/switch_sai_rpc.cpp src/gen-cpp/switch_sai_types.cpp \
               src/gen-cpp/SaiTui.cpp src/gen-cpp/sai_tui_types.cpp
 CPP_HEADERS = $(CPP_SOURCES:.cpp=.h)
@@ -29,9 +29,9 @@ $(ODIR):
 # Grouped targets (GNU make >= 4.3) prevent parallel recursive codegen races.
 # Both IDLs invalidate both language outputs; a deleted output is regenerated.
 $(CPP_SOURCES) $(CPP_HEADERS) &: $(IDL)
-	$(THRIFT) -o $(SRC) --gen cpp -r $(SRC)/switch_sai.thrift
+	$(THRIFT) -o $(SRC) --gen cpp -r idl/switch_sai.thrift
 $(PY_SOURCES) &: $(IDL)
-	$(THRIFT) -o $(SRC) --gen py -r $(SRC)/switch_sai.thrift
+	$(THRIFT) -o $(SRC) --gen py -r idl/switch_sai.thrift
 
 $(ODIR)/%.o: src/gen-cpp/%.cpp $(CPP_HEADERS) | $(ODIR)
 	$(CXX) $(CPPFLAGS) $(CFLAGS) $(CXXFLAGS) -MMD -MP -c $< -o $@

@@ -1,6 +1,6 @@
 # Bounded SERVER management API
 
-The `SaiTui` service in `src/sai_tui.thrift` is inherited by the legacy
+The `SaiTui` service in `idl/sai_tui.thrift` is inherited by the legacy
 `switch_sai_rpc` service. Both use the existing binary/buffered Thrift endpoint
 (default TCP 9090). The wire contract is [tui-api.md](tui-api.md). Existing
 legacy method signatures remain available in default mode; the bounded methods

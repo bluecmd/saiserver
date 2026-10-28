@@ -1,7 +1,6 @@
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
-load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_test")
-load("@saiserver//bazel:thrift.bzl", "thrift_codegen")
+load("@saiserver//bazel:thrift.bzl", "cc_thrift_library", "thrift_library")
 
 cc_test(
     name = "cpp_consumer_test",
@@ -26,31 +25,28 @@ rust_test(
     ],
 )
 
-# Exercise the exported rule and IDL include search from a different repository,
-# rather than merely depending on filegroups.
-thrift_codegen(
-    name = "consumer_protocol",
+# Exercise the exported rules and IDL include search from a different
+# repository, rather than merely depending on filegroups.
+thrift_library(
+    name = "consumer_thrift",
     src = "consumer.thrift",
-    includes = ["@saiserver//:thrift_idl"],
-    language = "cpp:no_skeleton",
-    outs = [
-        "generated/consumer_types.cpp",
-        "generated/consumer_types.h",
-    ],
+    deps = ["@saiserver//:thrift_idl"],
 )
 
-cc_library(
+cc_thrift_library(
     name = "consumer_cpp",
-    srcs = ["generated/consumer_types.cpp"],
-    hdrs = ["generated/consumer_types.h"],
-    strip_include_prefix = "generated",
+    lib = ":consumer_thrift",
+    outs = [
+        "consumer_types.cpp",
+        "consumer_types.h",
+    ],
     deps = ["@saiserver//:thrift_cpp"],
 )
 
 filegroup(
     name = "all_exports",
     srcs = [
-        ":consumer_protocol",
+        ":consumer_thrift",
         "@saiserver//:thrift_idl",
         "@saiserver//:client",
         "@saiserver//:server",

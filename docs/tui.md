@@ -1,7 +1,7 @@
 # sai-tui: bounded SAI management client
 
 `sai-tui` is a standalone Rust/Ratatui terminal client for the committed
-[`tui-api.md`](tui-api.md) / [`src/sai_tui.thrift`](../src/sai_tui.thrift)
+[`tui-api.md`](tui-api.md) / [`idl/sai_tui.thrift`](../idl/sai_tui.thrift)
 contract. It calls the real `tui_*` methods inherited by `switch_sai_rpc` on the
 same **binary protocol / buffered (not framed), non-multiplexed Thrift TCP**
 endpoint. It does not use legacy switch RPCs, a REST shim, or simulated state.
@@ -36,7 +36,7 @@ by hand. To regenerate from the **unchanged** committed small IDL, from the
 repository root with Apache Thrift compiler 0.25.0:
 
 ```sh
-thrift --gen rs -out tui/src src/sai_tui.thrift
+thrift --gen rs -out tui/src idl/sai_tui.thrift
 cargo fmt --manifest-path tui/Cargo.toml --check
 ```
 

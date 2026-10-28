@@ -7,7 +7,7 @@ THRIFT=${THRIFT:-thrift}
 CXX=${CXX:-g++}
 build=$(mktemp -d)
 trap 'rm -rf "$build"' EXIT
-"$THRIFT" -o "$build" --gen cpp -r src/switch_sai.thrift
+"$THRIFT" -o "$build" --gen cpp -r idl/switch_sai.thrift
 # EXTRA_CPPFLAGS / EXTRA_LDFLAGS support non-system Thrift installations.
 # SAI checkout uses a sibling experimental/; installed packages often nest it.
 for test in tui_rpc_test interface_address_rpc_test; do

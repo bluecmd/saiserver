@@ -87,7 +87,7 @@ All these labels also work as `@saiserver//:...` from another module.
 | `//:server_api` | Bounded C++ management backend (`tui_rpc.h`), without the legacy listener/main |
 | `//:sai_loader` | Optional SDK-neutral C entrypoint loader, for embedding applications |
 | `//:sai_headers` | `CcInfo` for official SAI headers; `#include <sai.h>` etc. |
-| `//:thrift_idl` | Both raw protocol files |
+| `//:thrift_idl` | `thrift_library` (`ThriftInfo`) for `switch_sai.thrift` and its `sai_tui.thrift` include |
 | `//:thrift_cpp` | Generated C++ types/services plus the required Thrift runtime |
 | `//:thrift_rust` | Freshly generated Rust RPC library, crate name `sai_tui_rpc` |
 | `//:thrift_rust_runtime` | Matching Rust `thrift` runtime, preserving trait/crate identity |
@@ -95,8 +95,10 @@ All these labels also work as `@saiserver//:...` from another module.
 | `//:thrift_runtime` | Binary/buffered socket C++ Thrift runtime |
 | `//:tests` | All twelve project Bazel test targets |
 
-Individual IDLs are exported as `@saiserver//src:sai_tui.thrift` and
-`@saiserver//src:switch_sai.thrift`. The latter inherits the bounded service.
+The IDL lives in `//idl`: `@saiserver//idl:sai_tui_thrift` and
+`@saiserver//idl:switch_sai_thrift` are the `thrift_library` targets (the
+latter inherits the bounded service), and the raw files are exported as
+`@saiserver//idl:sai_tui.thrift` and `@saiserver//idl:switch_sai.thrift`.
 
 Rust consumers constructing protocols/serializing these types should depend on
 `@saiserver//:thrift_rust_runtime` and import it as `thrift`. Do not independently
@@ -212,22 +214,33 @@ do not restore `-L/usr/lib -lsai` or search a local SDK.
 
 ### More protocol generation
 
-```starlark
-load("@saiserver//bazel:thrift.bzl", "thrift_codegen")
+`@saiserver//bazel:thrift.bzl` follows the `proto_library` pattern:
 
-thrift_codegen(
-    name = "my_types",
+```starlark
+load("@saiserver//bazel:thrift.bzl", "cc_thrift_library", "thrift_library")
+
+thrift_library(
+    name = "my_protocol_thrift",
     src = "my_protocol.thrift",  # e.g. include "sai_tui.thrift"
-    includes = ["@saiserver//:thrift_idl"],
-    language = "cpp:no_skeleton",
-    outs = ["generated/my_protocol_types.cpp", "generated/my_protocol_types.h"],
+    deps = ["@saiserver//:thrift_idl"],
+)
+
+cc_thrift_library(
+    name = "my_protocol_cc",
+    lib = ":my_protocol_thrift",
+    outs = ["my_protocol_types.cpp", "my_protocol_types.h"],
+    deps = ["@saiserver//:thrift_cpp"],  # C++ for the included IDL.
 )
 ```
 
-All declared outputs must share a directory. Compile the generated files in a
-`cc_library` depending on `@saiserver//:thrift_cpp`, as the example does.
-The rule infers include directories from declared IDL inputs and invokes the
-compiler directly; there is no shell command or host Thrift lookup.
+`thrift_library` holds one `.thrift` file and the `thrift_library` targets it
+includes; its `ThriftInfo` provider carries the transitive sources and `-I`
+directories. `cc_thrift_library` and `rust_thrift_library` generate and compile
+bindings, adding the matching Thrift runtime. The Thrift compiler names its
+outputs after the file and its services, so `outs` (or `out` for Rust) must
+list them. The lower-level `thrift_codegen` rule takes any generator spec. All
+of them invoke the pinned compiler directly; there is no shell command or host
+Thrift lookup.
 
 ## Obtaining binaries and vendor SDK deployment
 

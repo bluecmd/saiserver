@@ -1,0 +1,48 @@
+load("//bazel:thrift.bzl", "cc_thrift_library", "rust_thrift_library", "thrift_library")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "sai_tui.thrift",
+    "switch_sai.thrift",
+])
+
+thrift_library(
+    name = "sai_tui_thrift",
+    src = "sai_tui.thrift",
+)
+
+# The legacy service, which inherits the bounded SaiTui service.
+thrift_library(
+    name = "switch_sai_thrift",
+    src = "switch_sai.thrift",
+    deps = [":sai_tui_thrift"],
+)
+
+cc_thrift_library(
+    name = "switch_sai_cc",
+    lib = ":switch_sai_thrift",
+    recursive = True,
+    outs = [
+        "SaiTui.cpp",
+        "SaiTui.h",
+        "sai_tui_types.cpp",
+        "sai_tui_types.h",
+        "switch_sai_rpc.cpp",
+        "switch_sai_rpc.h",
+        "switch_sai_types.cpp",
+        "switch_sai_types.h",
+    ],
+)
+
+# Standalone RPC crate, without the TUI's Ratatui dependency tree.
+rust_thrift_library(
+    name = "sai_tui_rust",
+    lib = ":sai_tui_thrift",
+    out = "sai_tui.rs",
+    crate_name = "sai_tui_rpc",
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+)

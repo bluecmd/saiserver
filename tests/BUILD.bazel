@@ -108,8 +108,8 @@ cc_test(
 cc_test(
     name = "generated_bindings_test",
     srcs = ["test_generated_bindings.cpp"],
-    data = ["//src:sai_tui_rs", "//tui:src/sai_tui.rs"],
-    args = ["$(rootpath //src:sai_tui_rs)", "$(rootpath //tui:src/sai_tui.rs)"],
+    data = ["//idl:sai_tui_rust_codegen", "//tui:src/sai_tui.rs"],
+    args = ["$(rootpath //idl:sai_tui_rust_codegen)", "$(rootpath //tui:src/sai_tui.rs)"],
 )
 
 sh_test(

@@ -1,7 +1,7 @@
 # TUI Thrift management contract (v1)
 
 This bounded extension coexists with the legacy saiserver RPCs on the same
-binary/buffered Thrift endpoint (default TCP 9090). `src/sai_tui.thrift` defines
+binary/buffered Thrift endpoint (default TCP 9090). `idl/sai_tui.thrift` defines
 a service inherited by `switch_sai_rpc` for C++; the Rust client only needs this
 small IDL. All mutations must be followed by actual SAI getter readback. Never
 return cached requested attributes as if they were observed hardware state.

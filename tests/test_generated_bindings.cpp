@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
         if (argc != 3) throw std::runtime_error("expected generated and checked-in Rust binding paths");
         if (read_binding(argv[1]) != read_binding(argv[2])) {
             std::cerr << "Checked-in Rust bindings differ from Thrift 0.25.0 generation. "
-                         "Regenerate tui/src/sai_tui.rs from src/sai_tui.thrift and preserve the two lint attributes.\n";
+                         "Regenerate tui/src/sai_tui.rs from idl/sai_tui.thrift and preserve the two lint attributes.\n";
             return 1;
         }
     } catch (const std::exception& error) {
