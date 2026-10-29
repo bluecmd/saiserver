@@ -6,8 +6,10 @@
 #include "src/switch_sai_rpc_handler.h"
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/transport/TBufferTransports.h>
+#include <atomic>
 #include <cassert>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -76,6 +78,50 @@ void set_cases(Rpc& rpc) {
     set_status = SAI_STATUS_SUCCESS;
 }
 
+// The Thrift error the client gets for a request the handler rejects.
+std::string rejection(const std::function<void()>& call) {
+    try { call(); } catch (const apache::thrift::TApplicationException& e) { return e.what(); }
+    assert(!"expected the RPC to be rejected"); return "";
+}
+
+void rejection_cases(Rpc& rpc) {
+    // An attribute the handler cannot translate used to reach the SDK zeroed,
+    // with a SUCCESS reply. It must be rejected before any SDK call.
+    sets.clear(); creates.clear();
+    auto mcgrp = attribute(SAI_HOSTIF_ATTR_GENETLINK_MCGRP_NAME); mcgrp.value.chardata = "group";
+    auto message = rejection([&] {
+        rpc.client.send_sai_thrift_set_hostif_attribute(hif, mcgrp);
+        assert(rpc.processor.process(rpc.in, rpc.out, nullptr));
+        rpc.client.recv_sai_thrift_set_hostif_attribute();
+    });
+    assert(message.find("unsupported hostif attribute id") != std::string::npos && sets.empty());
+
+    auto type = attribute(SAI_HOSTIF_ATTR_TYPE); type.value.s32 = SAI_HOSTIF_TYPE_NETDEV;
+    rejection([&] {
+        rpc.client.send_sai_thrift_create_hostif({type, mcgrp});
+        assert(rpc.processor.process(rpc.in, rpc.out, nullptr));
+        rpc.client.recv_sai_thrift_create_hostif();
+    });
+    assert(creates.empty());
+
+    // NAME is a C string in a fixed buffer: an unpadded name is copied exactly
+    // (it used to be over-read), one that cannot fit is rejected.
+    auto obj = attribute(SAI_HOSTIF_ATTR_OBJ_ID); obj.value.oid = port;
+    auto name = attribute(SAI_HOSTIF_ATTR_NAME); name.value.chardata = "Ethernet0";
+    rpc.client.send_sai_thrift_create_hostif({type, obj, name});
+    assert(rpc.processor.process(rpc.in, rpc.out, nullptr));
+    assert(rpc.client.recv_sai_thrift_create_hostif() == static_cast<int64_t>(hif));
+    assert(creates.size() == 1 && std::string(creates[0].attrs[2].value.chardata) == "Ethernet0");
+    name.value.chardata = std::string(SAI_HOSTIF_NAME_SIZE, 'x');
+    message = rejection([&] {
+        rpc.client.send_sai_thrift_create_hostif({type, obj, name});
+        assert(rpc.processor.process(rpc.in, rpc.out, nullptr));
+        rpc.client.recv_sai_thrift_create_hostif();
+    });
+    assert(message.find("hostif name longer than") != std::string::npos && creates.size() == 1);
+    creates.clear();
+}
+
 void create_case(Rpc& rpc) {
     std::vector<switch_sai::sai_thrift_attribute_t> list;
     auto type = attribute(SAI_HOSTIF_ATTR_TYPE); type.value.s32 = SAI_HOSTIF_TYPE_NETDEV; list.push_back(type);
@@ -104,6 +150,7 @@ int main() {
     f.hostif.create_hostif = create_hostif;
     Rpc rpc;
     set_cases(rpc);
+    rejection_cases(rpc);
     create_case(rpc);
     std::cout << "hostif RPC: OPER_STATUS/QUEUE/VLAN_TAG reach set_hostif_attribute and create_hostif\n";
 }

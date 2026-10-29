@@ -37,6 +37,8 @@
 #include "src/tui_rpc.h"
 #include "src/bounded_rpc_processor.h"
 #include "src/switch_sai_rpc_handler.h"
+#include <stdexcept>
+#include <string>
 #include <thread>
 #include <condition_variable>
 #include <thrift/protocol/TBinaryProtocol.h>
@@ -90,6 +92,16 @@ extern std::mutex gFdbMutex;
 typedef std::vector<sai_thrift_attribute_t> std_sai_thrift_attr_vctr_t;
 
 std::vector<std::pair<sai_fdb_entry_t, sai_object_id_t>>gFdbMap;
+
+namespace {
+// A request attribute this handler cannot translate. Each parser has already
+// copied the attribute's ID, so passing it on would hand the SDK a zeroed
+// value. The generated processor turns this into a TApplicationException for
+// the client instead.
+[[noreturn]] void unsupported_attribute(const char* kind, int32_t id) {
+  throw std::invalid_argument(std::string("unsupported ") + kind + " attribute id " + std::to_string(id));
+}
+}  // namespace
 
 class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
   public:
@@ -204,15 +216,6 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       const char *v6_str = s.c_str();
       inet_pton(AF_INET6, v6_str, v6_ip);
       return;
-    }
-
-    inline void sai_thrift_alloc_attr(sai_attribute_t* &attr, const sai_uint32_t &size) const noexcept {
-      attr = new (std::nothrow) sai_attribute_t[size];
-    }
-
-    inline void sai_thrift_free_attr(sai_attribute_t* &attr) const noexcept {
-      delete[] attr;
-      attr = nullptr;
     }
 
     void sai_thrift_parse_object_id_list(const std::vector<sai_thrift_object_id_t> & thrift_object_id_list, sai_object_id_t *object_id_list) {
@@ -359,7 +362,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.u32 = attribute.value.u32;
           break;
         default:
-          break;
+          unsupported_attribute("port", attribute.id);
         }
       }
     }
@@ -381,7 +384,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.s32 = attribute.value.s32;
           break;
         default:
-          break;
+          unsupported_attribute("fdb", attribute.id);
         }
       }
     }
@@ -402,6 +405,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         case SAI_FDB_FLUSH_ATTR_ENTRY_TYPE:
           attr_list[i].value.s32 = attribute.value.s32;
           break;
+        default:
+          unsupported_attribute("fdb flush", attribute.id);
         }
       }
     }
@@ -420,6 +425,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         case SAI_VIRTUAL_ROUTER_ATTR_SRC_MAC_ADDRESS:
           sai_thrift_string_to_mac(attribute.value.mac, attr_list[i].value.mac);
           break;
+        default:
+          unsupported_attribute("vr", attribute.id);
         }
       }
     }
@@ -438,7 +445,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.s32 = attribute.value.s32;
           break;
         default:
-          break;
+          unsupported_attribute("route", attribute.id);
         }
       }
     }
@@ -478,7 +485,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.s32 = attribute.value.s32;
           break;
         default:
-          break;
+          unsupported_attribute("router interface", attribute.id);
         }
       }
     }
@@ -500,6 +507,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         case SAI_NEXT_HOP_ATTR_TUNNEL_ID:
           attr_list[i].value.oid = attribute.value.oid;
           break;
+        default:
+          unsupported_attribute("next hop", attribute.id);
         }
       }
     }
@@ -518,8 +527,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.oid = attribute.value.oid;
           break;
         default:
-          SAI_THRIFT_LOG_ERR("Failed to parse attribute.");
-          break;
+          unsupported_attribute("lag", attribute.id);
         }
       }
     }
@@ -541,6 +549,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           break;
         case SAI_LAG_MEMBER_ATTR_INGRESS_DISABLE:
           break;
+        default:
+          unsupported_attribute("lag member", attribute.id);
         }
       }
     }
@@ -552,15 +562,18 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         attribute = (sai_thrift_attribute_t)*it1;
         attr_list[i].id = attribute.id;
         switch (attribute.id) {
-        case SAI_STP_ATTR_VLAN_LIST:
+        case SAI_STP_ATTR_VLAN_LIST: {
           *vlan_list = (sai_vlan_id_t *) malloc(sizeof(sai_vlan_id_t) * attribute.value.vlanlist.vlan_count);
           std::vector<sai_thrift_vlan_id_t>::const_iterator it2 = attribute.value.vlanlist.vlan_list.begin();
           for (uint32_t j = 0; j < attribute.value.vlanlist.vlan_list.size(); j++, *it2++) {
-            *vlan_list[j] = (sai_vlan_id_t) *it2;
+            (*vlan_list)[j] = (sai_vlan_id_t) *it2;
           }
           attr_list[i].value.vlanlist.count = attribute.value.vlanlist.vlan_count;
           attr_list[i].value.vlanlist.list = *vlan_list;
           break;
+        }
+        default:
+          unsupported_attribute("stp", attribute.id);
         }
       }
     }
@@ -575,11 +588,13 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         case SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS:
           sai_thrift_string_to_mac(attribute.value.mac, attr_list[i].value.mac);
           break;
+        default:
+          unsupported_attribute("neighbor", attribute.id);
         }
       }
     }
 
-    void sai_thrift_parse_hostif_attributes(sai_attribute_t *attr_list, const std::vector<sai_thrift_attribute_t> &thrift_attr_list) const noexcept {
+    void sai_thrift_parse_hostif_attributes(sai_attribute_t *attr_list, const std::vector<sai_thrift_attribute_t> &thrift_attr_list) const {
       if (attr_list == nullptr || thrift_attr_list.empty()) {
         SAI_THRIFT_LOG_ERR("Invalid input arguments.");
         return;
@@ -599,9 +614,17 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.oid = attribute.value.oid;
           break;
 
-        case SAI_HOSTIF_ATTR_NAME:
-          std::memcpy(attr_list[i].value.chardata, attribute.value.chardata.c_str(), SAI_HOSTIF_NAME_SIZE);
+        case SAI_HOSTIF_ATTR_NAME: {
+          // A C string in a fixed SAI_HOSTIF_NAME_SIZE buffer: copy up to the
+          // first NUL, never past the request's string, and reject a name
+          // that does not fit with its terminator rather than truncate it.
+          const std::string name(attribute.value.chardata.c_str());
+          if (name.size() >= SAI_HOSTIF_NAME_SIZE)
+            throw std::invalid_argument("hostif name longer than " + std::to_string(SAI_HOSTIF_NAME_SIZE - 1) + " bytes");
+          std::memset(attr_list[i].value.chardata, 0, SAI_HOSTIF_NAME_SIZE);
+          std::memcpy(attr_list[i].value.chardata, name.data(), name.size());
           break;
+        }
 
         case SAI_HOSTIF_ATTR_OPER_STATUS:
           attr_list[i].value.booldata = attribute.value.booldata;
@@ -616,13 +639,12 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           break;
 
         default:
-          SAI_THRIFT_LOG_ERR("Failed to parse attribute.");
-          break;
+          unsupported_attribute("hostif", attribute.id);
         }
       }
     }
 
-    void sai_thrift_parse_hostif_table_entry_attributes(sai_attribute_t *attr_list, const std::vector<sai_thrift_attribute_t> &thrift_attr_list) const noexcept {
+    void sai_thrift_parse_hostif_table_entry_attributes(sai_attribute_t *attr_list, const std::vector<sai_thrift_attribute_t> &thrift_attr_list) const {
       if (attr_list == nullptr || thrift_attr_list.empty()) {
         SAI_THRIFT_LOG_ERR("Invalid input arguments.");
         return;
@@ -655,13 +677,12 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           break;
 
         default:
-          SAI_THRIFT_LOG_ERR("Failed to parse attribute.");
-          break;
+          unsupported_attribute("hostif table entry", attribute.id);
         }
       }
     }
 
-    void sai_thrift_parse_hostif_trap_group_attributes(sai_attribute_t *attr_list, const std::vector<sai_thrift_attribute_t> &thrift_attr_list) const noexcept {
+    void sai_thrift_parse_hostif_trap_group_attributes(sai_attribute_t *attr_list, const std::vector<sai_thrift_attribute_t> &thrift_attr_list) const {
       if (attr_list == nullptr || thrift_attr_list.empty()) {
         SAI_THRIFT_LOG_ERR("Invalid input arguments.");
         return;
@@ -683,13 +704,12 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.oid = attribute.value.oid;
           break;
         default:
-          SAI_THRIFT_LOG_ERR("Failed to parse attribute.");
-          break;
+          unsupported_attribute("hostif trap group", attribute.id);
         }
       }
     }
 
-    void sai_thrift_parse_hostif_trap_attributes(sai_attribute_t *attr_list, const std::vector<sai_thrift_attribute_t> &thrift_attr_list) const noexcept {
+    void sai_thrift_parse_hostif_trap_attributes(sai_attribute_t *attr_list, const std::vector<sai_thrift_attribute_t> &thrift_attr_list) const {
       if (attr_list == nullptr || thrift_attr_list.empty()) {
         SAI_THRIFT_LOG_ERR("Invalid input arguments.");
         return;
@@ -717,8 +737,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.oid = attribute.value.oid;
           break;
         default:
-          SAI_THRIFT_LOG_ERR("Failed to parse attribute.");
-          break;
+          unsupported_attribute("hostif trap", attribute.id);
         }
       }
     }
@@ -736,7 +755,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         attr->value.oid = thrift_attr.value.oid;
         break;
       default:
-        break;
+        unsupported_attribute("hostif trap", thrift_attr.id);
       }
     }
 
@@ -787,11 +806,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         return status;
       }
       sai_thrift_parse_fdb_entry(thrift_fdb_entry, &fdb_entry);
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_fdb_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       status = fdb_api->create_fdb_entry(&fdb_entry, attr_count, attr_list);
-      free(attr_list);
       return status;
     }
 
@@ -815,11 +834,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       if (status != SAI_STATUS_SUCCESS) {
         return status;
       }
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_fdb_flush_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       status = fdb_api->flush_fdb_entries(gSwitchId, attr_count, attr_list);
-      free(attr_list);
       return status;
     }
     //listing all the fdb entries from map
@@ -866,8 +885,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           break;
 
         default:
-          SAI_THRIFT_LOG_ERR("Failed to parse VLAN attributes.");
-          break;
+          unsupported_attribute("vlan", attribute.id);
         }
       }
     }
@@ -900,8 +918,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           break;
 
         default:
-          SAI_THRIFT_LOG_ERR("Failed to parse Bridge Port attributes");
-          break;
+          unsupported_attribute("bridge port", attribute.id);
         }
       }
     }
@@ -927,8 +944,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           break;
 
         default:
-          SAI_THRIFT_LOG_ERR("Failed to parse Bridge attributes.");
-          break;
+          unsupported_attribute("bridge", attribute.id);
         }
       }
     }
@@ -946,12 +962,12 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
 
       sai_attribute_t *attr_list = nullptr;
       sai_uint32_t attr_size = thrift_attr_list.size();
-      sai_thrift_alloc_attr(attr_list, attr_size);
+      std::vector<sai_attribute_t> attr_list_storage(attr_size);
+      attr_list = attr_list_storage.data();
       sai_thrift_parse_vlan_attributes(thrift_attr_list, attr_list);
 
       sai_object_id_t vlanObjId = 0;
       status = vlan_api->create_vlan(&vlanObjId, gSwitchId, attr_size, attr_list);
-      sai_thrift_free_attr(attr_list);
 
       if (status == SAI_STATUS_SUCCESS) { return vlanObjId; }
 
@@ -1043,11 +1059,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       if (status != SAI_STATUS_SUCCESS) {
         return status;
       }
-      sai_thrift_alloc_attr(attr_list, 1);
+      std::vector<sai_attribute_t> attr_list_storage(1);
+      attr_list = attr_list_storage.data();
       sai_thrift_parse_vlan_attributes(thrift_attr_list, attr_list);
 
       status = vlan_api->set_vlan_attribute(vlan_oid, attr_list);
-      sai_thrift_free_attr(attr_list);
       if (status != SAI_STATUS_SUCCESS) {
         SAI_THRIFT_LOG_ERR("Failed to set VLAN attribute");
         return status;
@@ -1065,7 +1081,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       if (status != SAI_STATUS_SUCCESS) {
         return status;
       }
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_vlan_member_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       vlan_api->create_vlan_member(&vlan_member_id, gSwitchId, attr_count, attr_list);
@@ -1088,6 +1105,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         case SAI_VLAN_MEMBER_ATTR_VLAN_TAGGING_MODE:
           attr_list[i].value.s32 = attribute.value.s32;
           break;
+        default:
+          unsupported_attribute("vlan member", attribute.id);
         }
       }
     }
@@ -1161,11 +1180,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       if (status != SAI_STATUS_SUCCESS) {
         return status;
       }
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_vr_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       vr_api->create_virtual_router(&vr_id, gSwitchId, attr_count, attr_list);
-      free(attr_list);
       return vr_id;
     }
 
@@ -1189,11 +1208,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         return status;
       }
       sai_thrift_parse_route_entry(thrift_route_entry, &route_entry);
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_route_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       status = route_api->create_route_entry(&route_entry, attr_count, attr_list);
-      free(attr_list);
       SAI_THRIFT_LOG_DBG("Exit.");
       return status;
     }
@@ -1219,11 +1238,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       if (status != SAI_STATUS_SUCCESS) {
         return status;
       }
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_router_interface_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       status = rif_api->create_router_interface(&rif_id, gSwitchId, attr_count, attr_list);
-      free(attr_list);
       return rif_id;
     }
 
@@ -1246,11 +1265,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       if (status != SAI_STATUS_SUCCESS) {
         return status;
       }
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_next_hop_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       status = nhop_api->create_next_hop(&nhop_id, gSwitchId, attr_count, attr_list);
-      free(attr_list);
       return nhop_id;
     }
 
@@ -1301,11 +1320,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         return status;
       }
 
-      sai_thrift_alloc_attr(attr_list, 1);
+      std::vector<sai_attribute_t> attr_list_storage(1);
+      attr_list = attr_list_storage.data();
       sai_thrift_parse_lag_attributes(thrift_attr_list, attr_list);
 
       status = lag_api->set_lag_attribute(lag_id, attr_list);
-      sai_thrift_free_attr(attr_list);
       if (status != SAI_STATUS_SUCCESS) {
         SAI_THRIFT_LOG_ERR("Failed to set LAG attribute");
         return status;
@@ -1322,7 +1341,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       if (status != SAI_STATUS_SUCCESS) {
         return status;
       }
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_lag_member_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       status = lag_api->create_lag_member(&lag_member_id, gSwitchId, attr_count, attr_list);
@@ -1374,12 +1394,12 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       if (status != SAI_STATUS_SUCCESS) {
         return status;
       }
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_stp_attributes(thrift_attr_list, attr_list, &vlan_list);
       uint32_t attr_count = thrift_attr_list.size();
       status = (sai_object_id_t) stp_api->create_stp(&stp_id, gSwitchId, attr_count, attr_list);
       if (vlan_list) free(vlan_list);
-      free(attr_list);
       return stp_id;
     }
 
@@ -1432,11 +1452,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         return status;
       }
       sai_thrift_parse_neighbor_entry(thrift_neighbor_entry, &neighbor_entry);
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_neighbor_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       status = neighbor_api->create_neighbor_entry(&neighbor_entry, attr_count, attr_list);
-      free(attr_list);
       return status;
     }
 
@@ -1462,10 +1482,10 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         return status;
       }
       sai_thrift_parse_neighbor_entry(thrift_neighbor_entry, &neighbor_entry);
-      sai_attribute_t *attr= (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr.size());
+      std::vector<sai_attribute_t> attr_storage(thrift_attr.size());
+      sai_attribute_t *attr = attr_storage.data();
       sai_thrift_parse_neighbor_attributes(thrift_attr, attr);
       status = neighbor_api->set_neighbor_entry_attribute(&neighbor_entry, attr);
-      free(attr);
       return status;
     }
 
@@ -1651,7 +1671,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         break;
 
       default:
-        printf("unknown thrift_attr id: %d\n", thrift_attr.id);
+        unsupported_attribute("switch", thrift_attr.id);
       }
     }
 
@@ -1669,7 +1689,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
 
       sai_uint32_t attr_size = thrift_attr_list.size();
 
-      sai_thrift_alloc_attr(sai_attrs, attr_size);
+      std::vector<sai_attribute_t> sai_attrs_storage(attr_size);
+      sai_attrs = sai_attrs_storage.data();
 
       sai_thrift_parse_bridge_port_attributes(thrift_attr_list, sai_attrs);
 
@@ -1678,7 +1699,6 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         SAI_THRIFT_LOG_ERR("failed to create bridge port, status:%d", ret.status);
       }
 
-      sai_thrift_free_attr(sai_attrs);
     }
 
     sai_thrift_status_t sai_thrift_remove_bridge_port(const sai_thrift_object_id_t bridge_port_id) {
@@ -1821,7 +1841,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
 
       sai_uint32_t attr_size = thrift_attr_list.size();
 
-      sai_thrift_alloc_attr(sai_attrs, attr_size);
+      std::vector<sai_attribute_t> sai_attrs_storage(attr_size);
+      sai_attrs = sai_attrs_storage.data();
 
       sai_thrift_parse_bridge_attributes(thrift_attr_list, sai_attrs);
 
@@ -1830,7 +1851,6 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         SAI_THRIFT_LOG_ERR("failed to create bridge, status:%d", ret.status);
       }
 
-      sai_thrift_free_attr(sai_attrs);
     }
 
     sai_thrift_status_t sai_thrift_remove_bridge(const sai_thrift_object_id_t bridge_port_id) {
@@ -1848,7 +1868,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       return bridge_api->remove_bridge((sai_object_id_t) bridge_port_id);
     }
 
-    sai_thrift_object_id_t sai_thrift_create_hostif (const std::vector<sai_thrift_attribute_t> &thrift_attr_list) noexcept {
+    sai_thrift_object_id_t sai_thrift_create_hostif (const std::vector<sai_thrift_attribute_t> &thrift_attr_list) {
       SAI_THRIFT_LOG_DBG("Called.");
 
       sai_hostif_api_t *hostif_api = nullptr;
@@ -1861,12 +1881,12 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
 
       sai_attribute_t *attr_list = nullptr;
       sai_size_t attr_size = thrift_attr_list.size();
-      sai_thrift_alloc_attr(attr_list, attr_size);
+      std::vector<sai_attribute_t> attr_list_storage(attr_size);
+      attr_list = attr_list_storage.data();
       sai_thrift_parse_hostif_attributes(attr_list, thrift_attr_list);
 
       sai_object_id_t hif_oid = 0;
       status = hostif_api->create_hostif (&hif_oid, gSwitchId, attr_size, attr_list);
-      sai_thrift_free_attr(attr_list);
 
       if (status == SAI_STATUS_SUCCESS) {
         SAI_THRIFT_LOG_DBG("Exited.");
@@ -1900,7 +1920,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       return status;
     }
 
-    sai_thrift_status_t sai_thrift_set_hostif_attribute(const sai_thrift_object_id_t thrift_hif_id, const sai_thrift_attribute_t &thrift_attr) noexcept {
+    sai_thrift_status_t sai_thrift_set_hostif_attribute(const sai_thrift_object_id_t thrift_hif_id, const sai_thrift_attribute_t &thrift_attr) {
       SAI_THRIFT_LOG_DBG("Called.");
 
       sai_hostif_api_t *hostif_api = nullptr;
@@ -1915,11 +1935,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
 
       sai_attribute_t *attr_list = nullptr;
       sai_size_t attr_size = thrift_attr_list.size();
-      sai_thrift_alloc_attr(attr_list, attr_size);
+      std::vector<sai_attribute_t> attr_list_storage(attr_size);
+      attr_list = attr_list_storage.data();
       sai_thrift_parse_hostif_attributes(attr_list, thrift_attr_list);
 
       status = hostif_api->set_hostif_attribute(thrift_hif_id, attr_list);
-      sai_thrift_free_attr(attr_list);
 
       if (status == SAI_STATUS_SUCCESS) {
         SAI_THRIFT_LOG_DBG("Exited.");
@@ -1931,7 +1951,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       return status;
     }
 
-    sai_thrift_object_id_t sai_thrift_create_hostif_table_entry(const std::vector<sai_thrift_attribute_t> &thrift_attr_list) noexcept {
+    sai_thrift_object_id_t sai_thrift_create_hostif_table_entry(const std::vector<sai_thrift_attribute_t> &thrift_attr_list) {
       SAI_THRIFT_LOG_DBG("Called.");
 
       sai_hostif_api_t *hostif_api = nullptr;
@@ -1944,12 +1964,12 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
 
       sai_attribute_t *attr_list = nullptr;
       sai_size_t attr_size = thrift_attr_list.size();
-      sai_thrift_alloc_attr(attr_list, attr_size);
+      std::vector<sai_attribute_t> attr_list_storage(attr_size);
+      attr_list = attr_list_storage.data();
       sai_thrift_parse_hostif_table_entry_attributes(attr_list, thrift_attr_list);
 
       sai_object_id_t hif_table_entry_oid = 0;
       status = hostif_api->create_hostif_table_entry(&hif_table_entry_oid, gSwitchId, attr_size, attr_list);
-      sai_thrift_free_attr(attr_list);
 
       if (status == SAI_STATUS_SUCCESS) {
         SAI_THRIFT_LOG_DBG("Exited.");
@@ -1983,7 +2003,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       return status;
     }
 
-    sai_thrift_status_t sai_thrift_set_hostif_table_entry_attribute(const sai_thrift_object_id_t thrift_hif_table_entry_id, const sai_thrift_attribute_t &thrift_attr) noexcept {
+    sai_thrift_status_t sai_thrift_set_hostif_table_entry_attribute(const sai_thrift_object_id_t thrift_hif_table_entry_id, const sai_thrift_attribute_t &thrift_attr) {
       SAI_THRIFT_LOG_DBG("Called.");
 
       sai_hostif_api_t *hostif_api = nullptr;
@@ -1998,11 +2018,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
 
       sai_attribute_t *attr_list = nullptr;
       sai_size_t attr_size = thrift_attr_list.size();
-      sai_thrift_alloc_attr(attr_list, attr_size);
-      sai_thrift_parse_hostif_trap_group_attributes(attr_list, thrift_attr_list);
+      std::vector<sai_attribute_t> attr_list_storage(attr_size);
+      attr_list = attr_list_storage.data();
+      sai_thrift_parse_hostif_table_entry_attributes(attr_list, thrift_attr_list);
 
       status = hostif_api->set_hostif_table_entry_attribute(thrift_hif_table_entry_id, attr_list);
-      sai_thrift_free_attr(attr_list);
 
       if (status == SAI_STATUS_SUCCESS) {
         SAI_THRIFT_LOG_DBG("Exited.");
@@ -2013,7 +2033,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       return status;
     }
 
-    sai_thrift_object_id_t sai_thrift_create_hostif_trap_group(const std::vector<sai_thrift_attribute_t> &thrift_attr_list) noexcept {
+    sai_thrift_object_id_t sai_thrift_create_hostif_trap_group(const std::vector<sai_thrift_attribute_t> &thrift_attr_list) {
       SAI_THRIFT_LOG_DBG("Called.");
 
       sai_hostif_api_t *hostif_api = nullptr;
@@ -2026,12 +2046,12 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
 
       sai_attribute_t *attr_list = nullptr;
       sai_size_t attr_size = thrift_attr_list.size();
-      sai_thrift_alloc_attr(attr_list, attr_size);
+      std::vector<sai_attribute_t> attr_list_storage(attr_size);
+      attr_list = attr_list_storage.data();
       sai_thrift_parse_hostif_trap_group_attributes(attr_list, thrift_attr_list);
 
       sai_object_id_t hostif_trap_group_oid = 0;
       status = hostif_api->create_hostif_trap_group(&hostif_trap_group_oid, gSwitchId, attr_size, attr_list);
-      sai_thrift_free_attr(attr_list);
 
       if (status == SAI_STATUS_SUCCESS) {
         SAI_THRIFT_LOG_DBG("Exited.");
@@ -2067,7 +2087,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
     }
 
     sai_thrift_status_t sai_thrift_set_hostif_trap_group_attribute(const sai_thrift_object_id_t thrift_hostif_trap_group_id,
-        const sai_thrift_attribute_t &thrift_attr) noexcept {
+        const sai_thrift_attribute_t &thrift_attr) {
       SAI_THRIFT_LOG_DBG("Called.");
 
       sai_hostif_api_t *hostif_api = nullptr;
@@ -2082,11 +2102,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
 
       sai_attribute_t *attr_list = nullptr;
       sai_size_t attr_size = thrift_attr_list.size();
-      sai_thrift_alloc_attr(attr_list, attr_size);
+      std::vector<sai_attribute_t> attr_list_storage(attr_size);
+      attr_list = attr_list_storage.data();
       sai_thrift_parse_hostif_trap_group_attributes(attr_list, thrift_attr_list);
 
       status = hostif_api->set_hostif_trap_group_attribute(thrift_hostif_trap_group_id, attr_list);
-      sai_thrift_free_attr(attr_list);
 
       if (status == SAI_STATUS_SUCCESS) {
         SAI_THRIFT_LOG_DBG("Exited.");
@@ -2098,7 +2118,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       return status;
     }
 
-    sai_thrift_object_id_t sai_thrift_create_hostif_trap(const std::vector<sai_thrift_attribute_t> &thrift_attr_list) noexcept {
+    sai_thrift_object_id_t sai_thrift_create_hostif_trap(const std::vector<sai_thrift_attribute_t> &thrift_attr_list) {
       SAI_THRIFT_LOG_DBG("Called.");
 
       sai_hostif_api_t *hostif_api = nullptr;
@@ -2111,12 +2131,12 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
 
       sai_attribute_t *attr_list = nullptr;
       sai_size_t attr_size = thrift_attr_list.size();
-      sai_thrift_alloc_attr(attr_list, attr_size);
+      std::vector<sai_attribute_t> attr_list_storage(attr_size);
+      attr_list = attr_list_storage.data();
       sai_thrift_parse_hostif_trap_attributes(attr_list, thrift_attr_list);
 
       sai_object_id_t hostif_trap_oid = 0;
       status = hostif_api->create_hostif_trap(&hostif_trap_oid, gSwitchId, attr_size, attr_list);
-      sai_thrift_free_attr(attr_list);
 
       if (status == SAI_STATUS_SUCCESS) {
         SAI_THRIFT_LOG_DBG("Exited.");
@@ -2166,11 +2186,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
 
       sai_attribute_t *attr_list = nullptr;
       sai_size_t attr_size = thrift_attr_list.size();
-      sai_thrift_alloc_attr(attr_list, attr_size);
+      std::vector<sai_attribute_t> attr_list_storage(attr_size);
+      attr_list = attr_list_storage.data();
       sai_thrift_parse_hostif_trap_attributes(attr_list, thrift_attr_list);
 
       status = hostif_api->set_hostif_trap_attribute(thrift_hostif_trap_id, attr_list);
-      sai_thrift_free_attr(attr_list);
 
       if (status == SAI_STATUS_SUCCESS) {
         SAI_THRIFT_LOG_DBG("Exited.");
@@ -2238,7 +2258,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.booldata = attribute.value.booldata;
           break;
         default:
-          break;
+          unsupported_attribute("acl table", attribute.id);
         }
       }
     }
@@ -2387,7 +2407,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.aclaction.parameter.u32 = attribute.value.aclaction.parameter.u32;
           break;
         default:
-          break;
+          unsupported_attribute("acl entry", attribute.id);
         }
       }
     }
@@ -2419,7 +2439,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.s32 = attribute.value.s32;
           break;
         default:
-          break;
+          unsupported_attribute("acl table group", attribute.id);
         }
       }
     }
@@ -2441,7 +2461,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.u32 = attribute.value.u32;
           break;
         default:
-          break;
+          unsupported_attribute("acl table group member", attribute.id);
         }
       }
     }
@@ -2510,11 +2530,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         return status;
       }
 
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_acl_table_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       status = acl_api->create_acl_table(&acl_table, gSwitchId, attr_count, attr_list);
-      free(attr_list);
       return acl_table;
     }
 
@@ -2542,13 +2562,13 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       sai_object_id_t *out_ports_list = NULL;
       sai_object_id_t *ingress_mirror_list = NULL;
       sai_object_id_t *egress_mirror_list = NULL;
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_acl_entry_attributes(thrift_attr_list, attr_list,
           &in_ports_list, &out_ports_list,
           &ingress_mirror_list, &egress_mirror_list);
       uint32_t attr_count = thrift_attr_list.size();
       status = acl_api->create_acl_entry(&acl_entry, gSwitchId, attr_count, attr_list);
-      free(attr_list);
       if (in_ports_list) free(in_ports_list);
       if (out_ports_list) free(out_ports_list);
       if (ingress_mirror_list) free(ingress_mirror_list);
@@ -2576,11 +2596,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         return status;
       }
 
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_acl_table_group_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       status = acl_api->create_acl_table_group(&acl_table_group_id, gSwitchId, attr_count, attr_list);
-      free(attr_list);
       return acl_table_group_id;
     }
 
@@ -2604,11 +2624,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         return status;
       }
 
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_acl_table_group_member_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       status = acl_api->create_acl_table_group_member(&acl_table_group_member_id, gSwitchId, attr_count, attr_list);
-      free(attr_list);
       return acl_table_group_member_id;
     }
 
@@ -2631,11 +2651,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       if (status != SAI_STATUS_SUCCESS) {
         return status;
       }
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_convert_to_acl_counter_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       status = acl_api->create_acl_counter(&acl_counter_id, gSwitchId, attr_count, attr_list);
-      free(attr_list);
       return acl_counter_id;
     }
 
@@ -2662,8 +2682,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       }
 
       uint32_t attr_count = thrift_attr_ids.size();
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_ids.size());
-      memset(attr_list, 0x0, sizeof(sizeof(sai_attribute_t) * thrift_attr_ids.size()));
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_ids.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_attribute_ids(thrift_attr_ids, attr_list);
       status = acl_api->get_acl_counter_attribute(acl_counter_id, attr_count, attr_list);
       if (status != SAI_STATUS_SUCCESS) {
@@ -2733,7 +2753,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.u16 = attribute.value.u32;
           break;
         default:
-          break;
+          unsupported_attribute("mirror session", attribute.id);
         }
       }
     }
@@ -2746,7 +2766,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       if (status != SAI_STATUS_SUCCESS) {
         return status;
       }
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_mirror_session_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       mirror_api->create_mirror_session(&session_id, gSwitchId, attr_count, attr_list);
@@ -2783,7 +2804,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
     }
 
     void sai_thrift_parse_policer_attributes(sai_attribute_t *attr_list,
-        const std::vector<sai_thrift_attribute_t> &thrift_attr_list) const noexcept {
+        const std::vector<sai_thrift_attribute_t> &thrift_attr_list) const {
       if (attr_list == nullptr || thrift_attr_list.empty()) {
         SAI_THRIFT_LOG_ERR("Invalid input arguments.");
         return;
@@ -2832,13 +2853,12 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.s32list.count = attribute.value.s32list.s32list.size();
           break;
         default:
-          SAI_THRIFT_LOG_ERR("Failed to parse attribute.");
-          break;
+          unsupported_attribute("policer", attribute.id);
         }
       }
     }
 
-    sai_thrift_object_id_t sai_thrift_create_policer(const std::vector<sai_thrift_attribute_t> &thrift_attr_list) noexcept {
+    sai_thrift_object_id_t sai_thrift_create_policer(const std::vector<sai_thrift_attribute_t> &thrift_attr_list) {
       SAI_THRIFT_LOG_DBG("Called.");
 
       sai_policer_api_t *policer_api = nullptr;
@@ -2892,7 +2912,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       return status;
     }
 
-    sai_thrift_status_t sai_thrift_set_policer_attribute(const sai_thrift_object_id_t thrift_policer_id, const sai_thrift_attribute_t &thrift_attr) noexcept {
+    sai_thrift_status_t sai_thrift_set_policer_attribute(const sai_thrift_object_id_t thrift_policer_id, const sai_thrift_attribute_t &thrift_attr) {
       SAI_THRIFT_LOG_DBG("Called.");
 
       sai_policer_api_t *policer_api = nullptr;
@@ -2990,7 +3010,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       if (status != SAI_STATUS_SUCCESS) {
         return status;
       }
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_scheduler_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       scheduler_api->create_scheduler(&scheduler_id, gSwitchId, attr_count, attr_list);
@@ -3034,6 +3055,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         case SAI_SCHEDULER_ATTR_SCHEDULING_TYPE:
           attr_list[i].value.s32 = attribute.value.s32;
           break;
+        default:
+          unsupported_attribute("scheduler", attribute.id);
         }
       }
     }
@@ -3251,7 +3274,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       if (status != SAI_STATUS_SUCCESS) {
         return status;
       }
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_buffer_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       buffer_api->create_buffer_profile(&buffer_id, gSwitchId, attr_count, attr_list);
@@ -3287,6 +3311,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         case SAI_BUFFER_PROFILE_ATTR_XON_TH:
           attr_list[i].value.u32 = attribute.value.u32;
           break;
+        default:
+          unsupported_attribute("buffer", attribute.id);
         }
       }
     }
@@ -3299,7 +3325,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       if (status != SAI_STATUS_SUCCESS) {
         return status;
       }
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_pool_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       buffer_api->create_buffer_pool(&pool_id, gSwitchId, attr_count, attr_list);
@@ -3322,6 +3349,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         case SAI_BUFFER_POOL_ATTR_THRESHOLD_MODE:
           attr_list[i].value.u32 = attribute.value.s32;
           break;
+        default:
+          unsupported_attribute("pool", attribute.id);
         }
       }
     }
@@ -3421,11 +3450,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       if (status != SAI_STATUS_SUCCESS) {
         return status;
       }
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_wred_attributes(thrift_attr_list, attr_list);
       uint32_t attr_count = thrift_attr_list.size();
       wred_api->create_wred(&wred_id, gSwitchId, attr_count, attr_list);
-      free(attr_list);
       return wred_id;
     }
 
@@ -3478,6 +3507,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         case SAI_WRED_ATTR_ECN_MARK_MODE:
           attr_list[i].value.s32 = attribute.value.s32;
           break;
+        default:
+          unsupported_attribute("wred", attribute.id);
         }
       }
     }
@@ -3531,7 +3562,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.u32 = attribute.value.u32;
           break;
         default:
-          break;
+          unsupported_attribute("tunnel", attribute.id);
         }
       }
     }
@@ -3560,7 +3591,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.oid=attribute.value.oid;
           break;
         default:
-          break;
+          unsupported_attribute("tunnel entry", attribute.id);
         }
       }
     }
@@ -3574,11 +3605,11 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       if (status != SAI_STATUS_SUCCESS) {
         return status;
       }
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_tunnel_attributes(thrift_attr_list,attr_list);
       uint32_t list_count = thrift_attr_list.size();
       status = tunnel_api->create_tunnel(&tunnel_id, gSwitchId, list_count, attr_list);
-      free(attr_list);
       return tunnel_id;
     }
 
@@ -3601,12 +3632,12 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       if (status != SAI_STATUS_SUCCESS) {
         return status;
       }
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_object_id_t tunnel_entry_id = 0;
       sai_thrift_parse_tunnel_entry_attributes(thrift_attr_list,attr_list);
       uint32_t list_count = thrift_attr_list.size();
       status = tunnel_api->create_tunnel_term_table_entry(&tunnel_entry_id, gSwitchId, list_count, attr_list);
-      free(attr_list);
       return tunnel_entry_id;
     }
 
@@ -3636,7 +3667,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         return status;
       }
 
-      attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      attr_list = attr_list_storage.data();
 
       for (uint32_t i = 0; i < thrift_attr_list.size(); i++, it++) {
         attribute = (sai_thrift_attribute_t)*it;
@@ -3647,7 +3679,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.s32 = attribute.value.s32;
           break;
 
-        case SAI_QOS_MAP_ATTR_MAP_TO_VALUE_LIST:
+        case SAI_QOS_MAP_ATTR_MAP_TO_VALUE_LIST: {
           sai_attribute_t *attr = &attr_list[i];
 
           attr->value.qosmap.count = attribute.value.qosmap.count;
@@ -3661,12 +3693,15 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           }
           break;
         }
+        default:
+          free(qos_map_list);
+          unsupported_attribute("qos map", attribute.id);
+        }
       }
 
       qos_map_api->create_qos_map(&qos_map_id, gSwitchId, thrift_attr_list.size(), attr_list);
 
       free(qos_map_list);
-      free(attr_list);
       return qos_map_id;
     }
 
@@ -3734,7 +3769,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           attr_list[i].value.s32 = attribute.value.s32;
           break;
         default:
-          break;
+          unsupported_attribute("debug counter", attribute.id);
         }
       }
     }
@@ -3751,7 +3786,8 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         return debug_counter_id;
       }
 
-      sai_attribute_t *attr_list = (sai_attribute_t *) malloc(sizeof(sai_attribute_t) * thrift_attr_list.size());
+      std::vector<sai_attribute_t> attr_list_storage(thrift_attr_list.size());
+      sai_attribute_t *attr_list = attr_list_storage.data();
       sai_thrift_parse_debug_counter_attributes(thrift_attr_list,
           attr_list,
           &in_debug_counter_ids_list,
@@ -3763,7 +3799,6 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           list_count,
           attr_list);
 
-      free(attr_list);
       free(in_debug_counter_ids_list);
       free(out_debug_counter_ids_list);
 
@@ -3902,7 +3937,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
     //
 
     void sai_thrift_parse_next_hop_group_attributes
-      (sai_attribute_t *attr_list, const std::vector<sai_thrift_attribute_t> &thrift_attr_list) noexcept {
+      (sai_attribute_t *attr_list, const std::vector<sai_thrift_attribute_t> &thrift_attr_list) {
         if (thrift_attr_list.empty() || attr_list == nullptr) { SAI_THRIFT_LOG_ERR("Invalid input arguments."); }
 
         std::vector<sai_thrift_attribute_t>::const_iterator cit = thrift_attr_list.begin();
@@ -3923,7 +3958,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
         }
       }
 
-    sai_thrift_object_id_t sai_thrift_create_next_hop_group(const std::vector<sai_thrift_attribute_t> &thrift_attr_list) noexcept {
+    sai_thrift_object_id_t sai_thrift_create_next_hop_group(const std::vector<sai_thrift_attribute_t> &thrift_attr_list) {
       SAI_THRIFT_LOG_DBG("Called.");
 
       sai_next_hop_group_api_t *nhop_group_api = nullptr;
@@ -3936,12 +3971,12 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
 
       sai_attribute_t *attr_list = nullptr;
       sai_uint32_t attr_size = thrift_attr_list.size();
-      sai_thrift_alloc_attr(attr_list, attr_size);
+      std::vector<sai_attribute_t> attr_list_storage(attr_size);
+      attr_list = attr_list_storage.data();
       sai_thrift_parse_next_hop_group_attributes(attr_list, thrift_attr_list);
 
       sai_object_id_t nhop_group_oid = 0;
       status = nhop_group_api->create_next_hop_group(&nhop_group_oid, gSwitchId, attr_size, attr_list);
-      sai_thrift_free_attr(attr_list);
 
       if (status == SAI_STATUS_SUCCESS) {
         SAI_THRIFT_LOG_DBG("Exited.");
@@ -3971,7 +4006,7 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
       return status;
     }
 
-    void sai_thrift_parse_next_hop_group_member_attributes(sai_attribute_t *attr_list, const std::vector<sai_thrift_attribute_t> &thrift_attr_list) noexcept {
+    void sai_thrift_parse_next_hop_group_member_attributes(sai_attribute_t *attr_list, const std::vector<sai_thrift_attribute_t> &thrift_attr_list) {
       if (thrift_attr_list.empty() || attr_list == nullptr) { SAI_THRIFT_LOG_ERR("Invalid input arguments."); }
 
       std::vector<sai_thrift_attribute_t>::const_iterator cit = thrift_attr_list.begin();
@@ -3991,13 +4026,12 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
           break;
 
         default:
-          SAI_THRIFT_LOG_ERR("Failed to parse attributes.");
-          break;
+          unsupported_attribute("next hop group member", attribute.id);
         }
       }
     }
 
-    sai_thrift_object_id_t sai_thrift_create_next_hop_group_member(const std::vector<sai_thrift_attribute_t> &thrift_attr_list) noexcept {
+    sai_thrift_object_id_t sai_thrift_create_next_hop_group_member(const std::vector<sai_thrift_attribute_t> &thrift_attr_list) {
       SAI_THRIFT_LOG_DBG("Called.");
 
       sai_next_hop_group_api_t *nhop_group_api = nullptr;
@@ -4010,12 +4044,12 @@ class switch_sai_rpcHandler : virtual public switch_sai_rpcIf {
 
       sai_attribute_t *attr_list = nullptr;
       sai_uint32_t attr_size = thrift_attr_list.size();
-      sai_thrift_alloc_attr(attr_list, attr_size);
+      std::vector<sai_attribute_t> attr_list_storage(attr_size);
+      attr_list = attr_list_storage.data();
       sai_thrift_parse_next_hop_group_member_attributes(attr_list, thrift_attr_list);
 
       sai_object_id_t nhop_group_member_oid = 0;
       status = nhop_group_api->create_next_hop_group_member(&nhop_group_member_oid, gSwitchId, attr_size, attr_list);
-      sai_thrift_free_attr(attr_list);
 
       if (status == SAI_STATUS_SUCCESS) {
         SAI_THRIFT_LOG_DBG("Exited.");
