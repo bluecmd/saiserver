@@ -25,20 +25,22 @@ pinned execution environment, use remote execution.
 
 ### Remote execution
 
-```sh
-bazel test --config=remote //...
+`//platforms:remote_linux_x86_64` pins every remote action's container to the
+official Debian image **by digest**, with networking off, so the shell tools are
+identical on every run. It works with any remote execution service that honors
+the `container-image` platform property. Endpoints are site-specific, so they are
+not committed. Define a `remote` config in `user.bazelrc` (gitignored, imported
+by `.bazelrc`):
+
+```text
+build:remote --remote_executor=grpcs://remote.example.com
+build:remote --remote_cache=grpcs://remote.example.com
+build:remote --extra_execution_platforms=//platforms:remote_linux_x86_64
+build:remote --spawn_strategy=remote,sandboxed
 ```
 
-`--config=remote` runs actions on BuildBuddy (`argocd-apps/apps/buildbuddy`),
-uses its cache, and streams the invocation to its UI. The execution platform
-`//platforms:remote_linux_x86_64` pins every action's container to the official
-Debian image **by digest**, with networking off, so the shell tools are identical
-on every run. Tests tagged `no-remote-exec` (the system tests, which need local
-kernel features) still run in the local sandbox. The executor pulls the image
-from Docker Hub once and then caches it. Anonymous builds are accepted. If
-`100.99.0.75` is unreachable, forward the service with
-`kubectl -n buildbuddy port-forward svc/buildbuddy 1985:1985` and override the
-three endpoints with `grpc://localhost:1985`.
+Then `bazel test --config=remote //...`. Tests tagged `no-remote-exec` (the
+system tests, which need local kernel features) still run in the local sandbox.
 
 ### What is pinned / what “hermetic” covers
 
@@ -68,12 +70,12 @@ three endpoints with `grpc://localhost:1985`.
   through a POSIX shell twice and copies three placeholders with Bash/cp. This detail is
   why merely selecting hermetic Rust/LLVM toolchains is not sufficient by itself.
 - Bazel itself is pinned by `.bazelversion` plus Bazelisk's SHA-256 check.
-  With `--config=remote`, those bootstrap tools come from the digest-pinned
+  With remote execution, those bootstrap tools come from the digest-pinned
   Debian image; locally they come from the host.
 - All configurations fix the locale/timezone, disable stamping and disable
   action network access. Standard test actions, **including test executables
   and subprocesses as well as Bazel's launcher/XML harness**, receive
-  `/usr/bin:/bin`; with `--config=remote` these tools are from the pinned image.
+  `/usr/bin:/bin`; with remote execution these tools are from the pinned image.
 
 **Runtime boundaries:** the host kernel is a prerequisite, not an OS image
 produced by this project. Built programs target
@@ -251,8 +253,7 @@ Thrift lookup.
 
 ## Obtaining binaries and vendor SDK deployment
 
-After `bazel build -c opt //:client //:server` (with or without
-`--config=remote`), copy the binaries out of `bazel-bin`:
+After `bazel build -c opt //:client //:server`, copy the binaries out of `bazel-bin`:
 
 ```sh
 cp bazel-bin/tui/sai-tui bazel-bin/src/saiserver /destination/
@@ -384,11 +385,11 @@ SHA-256 values matched the previous build. This verifies the project build
 closure, not a reproducible OS image or live SDK initialization.
 The separate consumer's C++ and Rust tests also passed, including real Rust
 serialization through the exported runtime and the external CLI runfiles test.
-The complete suite also passed with `--config=remote` (2,380 remote actions;
+The complete suite also passed with remote execution (2,380 remote actions;
 the system tests ran locally as tagged). A probe test confirmed that remote
 actions run in the pinned Debian image without network access.
 
-For the fully pinned configuration, use `bazel test --config=remote //...`.
+For the fully pinned configuration, run the suite with remote execution.
 An additional native closure probe, after warming repository downloads, is:
 
 ```sh
@@ -400,7 +401,7 @@ bazel test --nofetch --repository_disable_download --remote_cache= --disk_cache=
 ```
 
 Locks are frozen (`--lockfile_mode=error`), so repins are deliberate source
-edits: review the changes, then verify with `--config=remote`. To change Rust dependencies, edit the `crate.spec` tags in
+edits: review the changes, then verify with remote execution. To change Rust dependencies, edit the `crate.spec` tags in
 `MODULE.bazel`, then repin (`CARGO_BAZEL_REPIN=1` re-resolves all crates within
 their specs; `CARGO_BAZEL_REPIN=thrift` only that one):
 

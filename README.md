@@ -48,9 +48,9 @@ bazel test //...
 
 Bazelisk fetches Bazel **9.3.1** and verifies its SHA-256. Bazel downloads pinned
 Rust/LLVM toolchains, Thrift sources and SAI headers; no installed compiler,
-Thrift or vendor SDK is needed for the build. `--config=remote` runs the build on
-BuildBuddy in a digest-pinned Debian container, pinning the remaining shell
-tools too. The standalone server requires an explicit `SAI_LIBRARY_PATH`
+Thrift or vendor SDK is needed for the build. Remote execution in a
+digest-pinned Debian container pins the remaining shell tools too (see
+docs/bazel.md). The standalone server requires an explicit `SAI_LIBRARY_PATH`
 **at runtime**.
 
 Public targets include `@saiserver//:client_lib`, `:server_lib`, `:sai_headers`,

@@ -5,7 +5,8 @@ build --action_env=PATH=/nonexistent
 build --action_env=LC_ALL=C
 build --action_env=TZ=UTC
 # rules_rust's two process-wrapper bootstrap actions and three placeholder
-# copies require Bash/cp. --config=remote runs them in a digest-pinned image.
+# copies require Bash/cp. Remote execution on //platforms:remote_linux_x86_64
+# runs them in a digest-pinned image.
 build --host_action_env=PATH=/usr/bin:/bin
 build --host_action_env=LC_ALL=C
 build --host_action_env=TZ=UTC
@@ -31,17 +32,6 @@ build:clippy --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
 build:clippy --output_groups=+clippy_checks
 build:clippy --@rules_rust//rust/settings:clippy_flags=-Dwarnings
 
-# Remote execution on BuildBuddy (argocd-apps/apps/buildbuddy), with its cache
-# and build-event UI: actions run in the digest-pinned Debian container of
-# //platforms:remote_linux_x86_64. Tests that need local kernel features
-# (tagged no-remote-exec) still run in the local sandbox.
-#   bazel test --config=remote //...
-build:remote --remote_executor=grpc://100.99.0.75:1985
-build:remote --remote_cache=grpc://100.99.0.75:1985
-build:remote --bes_backend=grpc://100.99.0.75:1985
-build:remote --bes_results_url=https://buildbuddy.k8s.mainframe.dev/invocation/
-build:remote --remote_timeout=10m
-build:remote --remote_cache_compression
-build:remote --extra_execution_platforms=//platforms:remote_linux_x86_64
-build:remote --spawn_strategy=remote,sandboxed
-build:remote --jobs=50
+# Machine- or site-specific settings, such as a "remote" config for remote
+# execution (see docs/bazel.md), go in user.bazelrc, which is not committed.
+try-import %workspace%/user.bazelrc

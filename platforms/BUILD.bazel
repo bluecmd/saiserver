@@ -1,7 +1,8 @@
 # Execution platforms. See docs/bazel.md ("Remote execution").
 
-# BuildBuddy's Linux x86-64 executors run each action in its own OCI
-# container. Pinning that container makes the execution userspace (the bash
+# For remote executors that run each action in its own container image (the
+# REAPI `container-image` platform property, honored e.g. by BuildBuddy and
+# Buildbarn). Pinning that image makes the execution userspace (the bash
 # and coreutils used by Bazel's test harness and rules_rust's bootstrap; all
 # compilers are downloaded toolchains) the same everywhere: the official Debian
 # bookworm image, by digest.
