@@ -99,29 +99,20 @@ Build the server on a Linux x86_64 machine with `bazel build -c opt //:server` a
 copy it to the switch (see [obtaining binaries](docs/bazel.md#obtaining-binaries-and-vendor-sdk-deployment)).
 It does not link against libsai; the SDK is chosen when it starts.
 
+Use the SDK the switch's SONiC already ships: its `syncd` image contains the
+matching libsai with its dependencies, and the platform's own `sai.profile`
+(SDK settings such as `SAI_INIT_CONFIG_FILE`) under `/usr/share/sonic/hwsku`.
+Run the server where those are available, e.g. in a container from that image:
+
 ```
-# Download a matching libsai for your kernel driver
-./download-brcm-sai.sh
-
-sudo apt install ./libsaibcm*.deb
-
 sudo systemctl stop swss
 sudo systemctl stop syncd
 sudo mknod /dev/linux-user-bde c 126 0
 sudo rmmod linux_knet_cb
 sudo rmmod psample
 
-# copy broadcom config to config.bcm and/or modifiy sai.profile to match
-sudo SAI_LIBRARY_PATH=/usr/lib/libsai.so ./saiserver -p sai.profile
-```
-
-## Re-generate SAI Python library
-
-```
-pip3 install --user ctypesgen
-ctypesgen ~/Downloads/SAI/inc/sai*.h -I ~/Downloads/SAI/inc -I ~/Downloads/SAI/experimental/ -o sai_types.py
-# or
-ctypesgen /usr/include/sai/sai*.h -I /usr/include/sai/ -I /usr/include/sai/experimental/ -o sai_types.py
+# In the SDK's environment (libsai and the platform's hwsku files present):
+sudo SAI_LIBRARY_PATH=/usr/lib/libsai.so ./saiserver -p /usr/share/sonic/hwsku/sai.profile
 ```
 
 ## Example run
@@ -241,6 +232,4 @@ drivshell>ps
 drivshell>
 ```
 
-Use `./saiclient` to set all ports to enabled. It needs the `thrift` Python
-package and the bindings from `bazel build //idl:switch_sai_py`; set
-`SAI_THRIFT_PY` to their directory if you copied them elsewhere.
+Use `sai-tui` (e.g. `set port PORT_OID admin=true`) to enable ports.
