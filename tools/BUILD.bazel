@@ -4,7 +4,7 @@ _EXCLUDE = [
     "./.git/*",
     "./.lab/*",
     "./bazel-*",
-    "./examples/bazel/bazel-*",
+    "./examples/bazel-*",
     "./tui/target/*",
 ]
 

@@ -56,7 +56,7 @@ docs/bazel.md). The standalone server requires an explicit `SAI_LIBRARY_PATH`
 Public targets include `@saiserver//:client_lib`, `:server_lib`, `:sai_headers`,
 `:thrift_idl`, `:thrift_cpp` and `:thrift_rust`.
 See [Bazel targets, hermeticity boundary, SDK deployment and downstream use](docs/bazel.md)
-and the [separate Bzlmod consumer example](examples/bazel).
+and the [separate Bzlmod consumer examples](examples).
 
 ## Run the TUI
 

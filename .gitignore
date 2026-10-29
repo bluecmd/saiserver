@@ -7,8 +7,8 @@ __pycache__/
 target/
 
 # Local Bazel settings (e.g. a remote execution config); see .bazelrc.
-/user.bazelrc
+user.bazelrc
 
 # Bazel's output symlinks; dependency lockfiles remain tracked.
 /bazel-*
-/examples/bazel/bazel-*
+/examples/bazel-*

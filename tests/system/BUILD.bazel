@@ -154,3 +154,30 @@ sh_test(
     target_compatible_with = LINUX_X86_64,
     deps = ["@rules_shell//shell/runfiles"],
 )
+
+# The examples/ programs against a real (software) SAI.
+sh_test(
+    name = "vs_examples_test",
+    size = "medium",
+    srcs = ["vs_test.sh"],
+    args = _VS_ARGS + [
+        "--bind",
+        "$(rlocationpath //examples:show_interfaces_cpp):/systest/bin/show_interfaces_cpp",
+        "--bind",
+        "$(rlocationpath //examples:show_interfaces_rust):/systest/bin/show_interfaces_rust",
+        "--bind",
+        "$(rlocationpath :examples_check.sh):/systest/examples_check.sh",
+        "--",
+        "/bin/bash",
+        "/systest/examples_check.sh",
+    ],
+    data = _VS + [
+        "examples_check.sh",
+        "//examples:show_interfaces_cpp",
+        "//examples:show_interfaces_rust",
+    ],
+    # Needs unprivileged user namespaces on the test host.
+    tags = ["no-remote-exec"],
+    target_compatible_with = LINUX_X86_64,
+    deps = ["@rules_shell//shell/runfiles"],
+)

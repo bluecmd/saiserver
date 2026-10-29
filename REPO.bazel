@@ -1,0 +1,6 @@
+# Not packages of this repository: the private lab directory and the
+# convenience symlinks Bazel creates when examples/ is built as its own module.
+ignore_directories([
+    ".lab",
+    "examples/bazel-*",
+])

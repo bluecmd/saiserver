@@ -9,7 +9,7 @@ bazel_dep(name = "toolchains_llvm_bootstrapped", version = "0.5.9")
 # In production replace this with a commit-pinned git/archive override.
 local_path_override(
     module_name = "saiserver",
-    path = "../..",
+    path = "..",
 )
 
 # rules_rust deliberately accepts toolchain configuration only from the root.

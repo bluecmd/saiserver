@@ -1,0 +1,62 @@
+# Example programs using saiserver's public targets. This directory is its own
+# Bzlmod module (see MODULE.bazel), and the main repository also builds it as
+# //examples so //tests/system can run the programs against a software SAI.
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rustfmt_test")
+load("@saiserver//bazel:thrift.bzl", "cc_thrift_library", "thrift_library")
+
+package(default_visibility = ["//visibility:public"])
+
+# `show interfaces brief` for a running saiserver, in C++ and in Rust; both
+# print the same table.
+cc_binary(
+    name = "show_interfaces_cpp",
+    srcs = ["show_interfaces.cc"],
+    deps = ["@saiserver//:thrift_cpp"],
+)
+
+rust_binary(
+    name = "show_interfaces_rust",
+    srcs = ["show_interfaces.rs"],
+    edition = "2021",
+    deps = [
+        "@saiserver//:thrift_rust",
+        "@saiserver//:thrift_rust_runtime",
+    ],
+)
+
+# Extending the protocol: a new IDL that includes saiserver's, compiled with
+# the exported Thrift rules.
+thrift_library(
+    name = "consumer_thrift",
+    src = "consumer.thrift",
+    deps = ["@saiserver//:thrift_idl"],
+)
+
+cc_thrift_library(
+    name = "consumer_cpp",
+    outs = [
+        "consumer_types.cpp",
+        "consumer_types.h",
+    ],
+    lib = ":consumer_thrift",
+    deps = ["@saiserver//:thrift_cpp"],
+)
+
+# The executables and libraries a consumer would deploy or link.
+filegroup(
+    name = "all_exports",
+    srcs = [
+        ":consumer_cpp",
+        "@saiserver//:client",
+        "@saiserver//:sai_loader",
+        "@saiserver//:server",
+        "@saiserver//:server_lib",
+    ],
+)
+
+rustfmt_test(
+    name = "rustfmt_test",
+    size = "small",
+    targets = [":show_interfaces_rust"],
+)

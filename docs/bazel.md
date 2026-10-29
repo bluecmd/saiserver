@@ -124,14 +124,20 @@ use the protocol without pulling in Ratatui.
 
 ## Downstream Bzlmod projects
 
-A complete, separately tested consumer is in [examples/bazel](../examples/bazel).
-It builds both executables, links the actual server library, uses both Rust
-libraries, and generates/compiles a new protocol importing our IDL. Run it from
-the repository root with:
+[examples/](../examples) is a separate Bzlmod module that uses saiserver the way
+a downstream project would. `show_interfaces_cpp` and `show_interfaces_rust`
+connect to a running server and print a `show interfaces brief`-style table of
+ports and VLAN membership through the public C++ (`//:thrift_cpp`) and Rust
+(`//:thrift_rust`) bindings. It also compiles a new protocol that includes our
+IDL, and builds the deployable executables and libraries:
 
 ```sh
-(cd examples/bazel && bazel test //... @saiserver//tui:cli_test)
+(cd examples && bazel build //... && bazel test @saiserver//tui:cli_test)
 ```
+
+The main repository builds the same package as `//examples`, so
+`//tests/system:vs_examples_test` runs both programs against SONiC's libsaivs.
+They must print identical tables listing every switch port and VLAN 1.
 
 For a fully pinned execution environment, another project can reuse
 `@saiserver//platforms:remote_linux_x86_64` or define its own digest-pinned
@@ -207,11 +213,9 @@ cc_library(
 The legacy listener expects the embedding application to define
 `sai_object_id_t gSwitchId` and `std::mutex gFdbMutex`. Initialize the SDK and
 set the actual switch ID before starting the RPC server. Register/coordinate
-notification callbacks and SDK lifecycle as in the standalone main. The
-[consumer](../examples/bazel/consumer.cpp) demonstrates actual library linkage
-without starting a listener or touching hardware. Its failing API provider is
-**test-only**, never a production default. The bounded `server_api` backend
-instead accepts the switch ID explicitly.
+notification callbacks and SDK lifecycle as in the standalone main
+(`src/saiserver.cpp`). The bounded `server_api` backend instead accepts the
+switch ID explicitly.
 
 Project headers are included by their repository path, e.g.
 `#include "src/switch_sai_rpc_server.h"`; generated Thrift headers by file name
@@ -397,7 +401,7 @@ bazel clean
 bazel test --nofetch --repository_disable_download --remote_cache= --disk_cache= \
   --sandbox_block_path=/usr/include \
   --sandbox_block_path=/usr/bin/gcc --sandbox_block_path=/usr/bin/g++ //...
-(cd examples/bazel && bazel test //...)
+(cd examples && bazel build //...)
 ```
 
 Locks are frozen (`--lockfile_mode=error`), so repins are deliberate source
@@ -408,7 +412,7 @@ their specs; `CARGO_BAZEL_REPIN=thrift` only that one):
 ```sh
 CARGO_BAZEL_REPIN=1 bazel build --lockfile_mode=update --repo_env=CARGO_BAZEL_REPIN=1 //:client
 bazel test //...
-(cd examples/bazel && bazel test --lockfile_mode=update //...)
+(cd examples && bazel build --lockfile_mode=update //...)
 ```
 
 Format and lint Starlark with `bazel run //tools:buildifier` (or
