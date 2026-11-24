@@ -49,13 +49,9 @@ cc_library(
     name = "server_lib",
     srcs = ["switch_sai_rpc_server.cpp"],
     hdrs = ["switch_sai_rpc_handler.h"],
-    # The legacy handler predates override annotations; retain other warnings.
     # Its parsers throw on unsupported attributes: a throw that can only reach
     # a noexcept boundary would terminate the server instead.
-    copts = SAISERVER_COPTS + [
-        "-Wno-inconsistent-missing-override",
-        "-Werror=exceptions",
-    ],
+    copts = SAISERVER_COPTS + ["-Werror=exceptions"],
     deps = [
         ":bounded_rpc_processor",
         ":rpc_listener_api",
